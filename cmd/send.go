@@ -201,3 +201,6 @@ func buildMessagesFromFlags(msgBuilder func(to string) types.Message) ([]types.M
 	}
 	return msgs, nil
 }
+
+// boolPtr returns a pointer to the given bool value.
+func boolPtr(v bool) *bool { return &v }

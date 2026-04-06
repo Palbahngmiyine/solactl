@@ -29,6 +29,35 @@ func resetSendFlags() {
 	sendLMSFlagSubject = ""
 	sendMMSFlagImage = ""
 	sendMMSFlagSubject = ""
+	// ATA
+	sendATAFlagPfID = ""
+	sendATAFlagTemplateID = ""
+	sendATAFlagVariables = ""
+	sendATAFlagTitle = ""
+	sendATAFlagDisableSms = false
+	sendATAFlagButtons = ""
+	// BMS
+	sendBMSFlagPfID = ""
+	sendBMSFlagTemplateID = ""
+	sendBMSFlagVariables = ""
+	sendBMSFlagFree = false
+	sendBMSFlagBubbleType = ""
+	sendBMSFlagTargeting = ""
+	sendBMSFlagAd = false
+	sendBMSFlagAdult = false
+	sendBMSFlagImage = ""
+	sendBMSFlagButtonName = ""
+	sendBMSFlagButtonType = ""
+	sendBMSFlagButtonURL = ""
+	sendBMSFlagButtons = ""
+	// RCS
+	sendRCSFlagBrandID = ""
+	sendRCSFlagTemplateID = ""
+	sendRCSFlagVariables = ""
+	sendRCSFlagSubject = ""
+	sendRCSFlagImage = ""
+	sendRCSFlagMmsType = ""
+	sendRCSFlagCopyAllowed = false
 }
 
 // setupSendTest creates a test environment with a mock HTTP server.
@@ -1467,5 +1496,1493 @@ func TestLoadCSVMessages_NoToColumn(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "to") {
 		t.Errorf("error should mention missing 'to' column, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ATA (Kakao Alimtalk) Tests
+// ---------------------------------------------------------------------------
+
+func TestSendATA_Success(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+
+	buf := captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "KA01PF001",
+		"--template-id", "KA01TP001",
+		"--variables", `{"#{이름}":"홍길동"}`,
+		"--text", "안녕하세요 홍길동님",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(captured.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(captured.Messages))
+	}
+	msg := captured.Messages[0]
+	if msg.KakaoOptions == nil {
+		t.Fatal("kakaoOptions should not be nil")
+	}
+	if msg.KakaoOptions.PfID != "KA01PF001" {
+		t.Errorf("pfId: got %q", msg.KakaoOptions.PfID)
+	}
+	if msg.KakaoOptions.TemplateID != "KA01TP001" {
+		t.Errorf("templateId: got %q", msg.KakaoOptions.TemplateID)
+	}
+	if msg.KakaoOptions.Variables["#{이름}"] != "홍길동" {
+		t.Errorf("variables: got %v", msg.KakaoOptions.Variables)
+	}
+	if !strings.Contains(buf.String(), "G4V20210714152900TESTHASH") {
+		t.Errorf("output should contain group ID")
+	}
+}
+
+func TestSendATA_WithButtons(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "KA01PF001",
+		"--template-id", "KA01TP001",
+		"--text", "버튼 테스트",
+		"--buttons", `[{"buttonType":"WL","buttonName":"바로가기","linkMo":"https://example.com"}]`,
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(captured.Messages[0].KakaoOptions.Buttons) != 1 {
+		t.Fatalf("expected 1 button, got %d", len(captured.Messages[0].KakaoOptions.Buttons))
+	}
+	btn := captured.Messages[0].KakaoOptions.Buttons[0]
+	if btn.ButtonType != "WL" || btn.ButtonName != "바로가기" {
+		t.Errorf("button: got type=%q name=%q", btn.ButtonType, btn.ButtonName)
+	}
+}
+
+func TestSendATA_MissingPfID(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "ata", "--to", "01011111111", "--template-id", "T1"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --pfid")
+	}
+	if !strings.Contains(err.Error(), "--pfid") {
+		t.Errorf("error should mention --pfid: %v", err)
+	}
+}
+
+func TestSendATA_MissingTemplateID(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "ata", "--to", "01011111111", "--pfid", "PF1"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --template-id")
+	}
+	if !strings.Contains(err.Error(), "--template-id") {
+		t.Errorf("error should mention --template-id: %v", err)
+	}
+}
+
+func TestSendATA_MissingTo(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "ata", "--pfid", "PF1", "--template-id", "T1"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --to")
+	}
+	if !strings.Contains(err.Error(), "--to") {
+		t.Errorf("error should mention --to: %v", err)
+	}
+}
+
+func TestSendATA_OptionalFrom(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	// from is not provided — should succeed for Kakao types
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "KA01PF001",
+		"--template-id", "KA01TP001",
+		"--text", "테스트",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("ATA should not require --from: %v", err)
+	}
+}
+
+func TestSendATA_InvalidVariablesJSON(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--text", "테스트",
+		"--variables", "{invalid json}",
+	})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "변수 JSON 파싱 실패") {
+		t.Errorf("error should mention JSON parse failure: %v", err)
+	}
+}
+
+func TestSendATA_InvalidButtonsJSON(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--text", "테스트",
+		"--buttons", "[{bad}]",
+	})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid buttons JSON")
+	}
+	if !strings.Contains(err.Error(), "버튼 JSON 파싱 실패") {
+		t.Errorf("error should mention button parse failure: %v", err)
+	}
+}
+
+func TestSendATA_TooManyButtons(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	buttons := `[{"buttonType":"WL"},{"buttonType":"WL"},{"buttonType":"WL"},{"buttonType":"WL"},{"buttonType":"WL"},{"buttonType":"WL"}]`
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--text", "테스트",
+		"--buttons", buttons,
+	})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for >5 buttons")
+	}
+	if !strings.Contains(err.Error(), "최대 5개") {
+		t.Errorf("error should mention max 5 buttons: %v", err)
+	}
+}
+
+func TestSendATA_WithDisableSms(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--text", "테스트",
+		"--disable-sms",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	ko := captured.Messages[0].KakaoOptions
+	if ko.DisableSms == nil || !*ko.DisableSms {
+		t.Error("disableSms should be true")
+	}
+}
+
+func TestSendATA_WithTitle(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--text", "테스트",
+		"--title", "강조 제목",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if captured.Messages[0].KakaoOptions.Title != "강조 제목" {
+		t.Errorf("title: got %q", captured.Messages[0].KakaoOptions.Title)
+	}
+}
+
+func TestSendATA_MultipleRecipients(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(2, 2, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111,01022222222",
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--text", "테스트",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(captured.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(captured.Messages))
+	}
+	for _, msg := range captured.Messages {
+		if msg.KakaoOptions == nil {
+			t.Error("each message should have kakaoOptions")
+		}
+	}
+}
+
+func TestSendATA_JSONOutput(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+
+	buf := captureBuf(t)
+	flagJSON = true
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--text", "테스트",
+		"--json",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+}
+
+func TestSendATA_APIError(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"errorCode":"ValidationError","errorMessage":"유효하지 않은 템플릿"}`))
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "INVALID",
+		"--text", "테스트",
+	})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error from API")
+	}
+}
+
+func TestSendATA_CSVBulk(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(2, 2, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	tmpDir := t.TempDir()
+	csvPath := filepath.Join(tmpDir, "ata.csv")
+	csvContent := "to,name\n01011111111,홍길동\n01022222222,김영희\n"
+	if err := os.WriteFile(csvPath, []byte(csvContent), 0644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	rootCmd.SetArgs([]string{
+		"send", "ata",
+		"--file", csvPath,
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--text", "안녕하세요 {{name}}님",
+		"--to", "dummy", // required by parseRecipients but overridden by CSV
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(captured.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(captured.Messages))
+	}
+	for _, msg := range captured.Messages {
+		if msg.KakaoOptions == nil || msg.KakaoOptions.PfID != "PF1" {
+			t.Errorf("CSV messages should have kakaoOptions with pfId=PF1")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BMS (Kakao Business Message) Tests
+// ---------------------------------------------------------------------------
+
+func TestSendBMS_TemplateSuccess(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "KA01BPTPL001",
+		"--targeting", "I",
+		"--variables", `{"#{이름}":"홍길동"}`,
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	msg := captured.Messages[0]
+	if msg.KakaoOptions == nil {
+		t.Fatal("kakaoOptions should not be nil")
+	}
+	if msg.KakaoOptions.TemplateID != "KA01BPTPL001" {
+		t.Errorf("templateId: got %q", msg.KakaoOptions.TemplateID)
+	}
+	if msg.KakaoOptions.BMS == nil || msg.KakaoOptions.BMS.Targeting != "I" {
+		t.Error("BMS targeting should be I")
+	}
+}
+
+func TestSendBMS_TemplateMissingPfID(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "bms", "--to", "010", "--template-id", "T1", "--targeting", "I"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --pfid")
+	}
+	if !strings.Contains(err.Error(), "--pfid") {
+		t.Errorf("error should mention --pfid: %v", err)
+	}
+}
+
+func TestSendBMS_TemplateMissingTemplateID(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "bms", "--to", "010", "--pfid", "PF1", "--targeting", "I"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --template-id")
+	}
+	if !strings.Contains(err.Error(), "--template-id") {
+		t.Errorf("error should mention --template-id: %v", err)
+	}
+}
+
+func TestSendBMS_FreeSuccess(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms",
+		"--free",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--bubble-type", "TEXT",
+		"--targeting", "M",
+		"--text", "자유형 메시지",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	msg := captured.Messages[0]
+	if msg.KakaoOptions == nil || msg.KakaoOptions.BMS == nil {
+		t.Fatal("BMS options should not be nil")
+	}
+	if msg.KakaoOptions.BMS.ChatBubbleType != "TEXT" {
+		t.Errorf("chatBubbleType: got %q", msg.KakaoOptions.BMS.ChatBubbleType)
+	}
+	if msg.KakaoOptions.BMS.Targeting != "M" {
+		t.Errorf("targeting: got %q", msg.KakaoOptions.BMS.Targeting)
+	}
+}
+
+func TestSendBMS_FreeMissingBubbleType(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "bms", "--free", "--to", "010", "--pfid", "PF1", "--targeting", "I"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --bubble-type")
+	}
+	if !strings.Contains(err.Error(), "--bubble-type") {
+		t.Errorf("error should mention --bubble-type: %v", err)
+	}
+}
+
+func TestSendBMS_FreeMissingTargeting(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "bms", "--to", "010", "--pfid", "PF1"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --targeting")
+	}
+	if !strings.Contains(err.Error(), "--targeting") {
+		t.Errorf("error should mention --targeting: %v", err)
+	}
+}
+
+func TestSendBMS_FreeInvalidBubbleType(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms", "--free",
+		"--to", "010",
+		"--pfid", "PF1",
+		"--bubble-type", "INVALID",
+		"--targeting", "I",
+	})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid bubble type")
+	}
+	if !strings.Contains(err.Error(), "유효하지 않은 chatBubbleType") {
+		t.Errorf("error should mention invalid chatBubbleType: %v", err)
+	}
+}
+
+func TestSendBMS_FreeInvalidTargeting(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "bms", "--to", "010", "--pfid", "PF1", "--targeting", "X"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid targeting")
+	}
+	if !strings.Contains(err.Error(), "유효하지 않은 targeting") {
+		t.Errorf("error should mention invalid targeting: %v", err)
+	}
+}
+
+func TestSendBMS_FreeWithImage(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+	var uploadType string
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/storage/v1/files"):
+			body, _ := io.ReadAll(r.Body)
+			var req types.UploadFileRequest
+			_ = json.Unmarshal(body, &req)
+			uploadType = req.Type
+
+			resp := types.UploadFileResponse{FileID: "BMS_IMG_001", Name: "bms.jpg"}
+			data, _ := json.Marshal(resp)
+			w.WriteHeader(200)
+			_, _ = w.Write(data)
+
+		case strings.HasSuffix(r.URL.Path, "/messages/v4/send-many/detail"):
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &captured)
+
+			resp := mockSendResponse(1, 1, 0)
+			data, _ := json.Marshal(resp)
+			w.WriteHeader(200)
+			_, _ = w.Write(data)
+
+		default:
+			w.WriteHeader(404)
+		}
+	})
+	captureBuf(t)
+
+	tmpDir := t.TempDir()
+	imgPath := filepath.Join(tmpDir, "bms.jpg")
+	_ = os.WriteFile(imgPath, []byte("fake-bms-image"), 0644)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms", "--free",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--bubble-type", "IMAGE",
+		"--targeting", "I",
+		"--text", "이미지 메시지",
+		"--image", imgPath,
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if uploadType != "KAKAO" {
+		t.Errorf("upload type should be KAKAO, got %q", uploadType)
+	}
+	if captured.Messages[0].KakaoOptions.ImageID != "BMS_IMG_001" {
+		t.Errorf("imageId: got %q", captured.Messages[0].KakaoOptions.ImageID)
+	}
+}
+
+func TestSendBMS_FreeWithAdFlag(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms", "--free",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--bubble-type", "TEXT",
+		"--targeting", "M",
+		"--text", "광고 메시지",
+		"--ad",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	ko := captured.Messages[0].KakaoOptions
+	if ko.AdFlag == nil || !*ko.AdFlag {
+		t.Error("adFlag should be true")
+	}
+}
+
+func TestSendBMS_FreeWithSingleButton(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms", "--free",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--bubble-type", "TEXT",
+		"--targeting", "I",
+		"--text", "버튼 테스트",
+		"--button-name", "자세히 보기",
+		"--button-type", "WL",
+		"--button-url", "https://example.com",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	buttons := captured.Messages[0].KakaoOptions.Buttons
+	if len(buttons) != 1 {
+		t.Fatalf("expected 1 button, got %d", len(buttons))
+	}
+	if buttons[0].ButtonName != "자세히 보기" {
+		t.Errorf("button name: got %q", buttons[0].ButtonName)
+	}
+}
+
+func TestSendBMS_OptionalFrom(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "T1",
+		"--targeting", "I",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("BMS should not require --from: %v", err)
+	}
+}
+
+func TestSendBMS_FreeAdultFlag(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms", "--free",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--bubble-type", "TEXT",
+		"--targeting", "I",
+		"--text", "성인 컨텐츠",
+		"--adult",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	bms := captured.Messages[0].KakaoOptions.BMS
+	if bms.Adult == nil || !*bms.Adult {
+		t.Error("adult should be true")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RCS Tests
+// ---------------------------------------------------------------------------
+
+func TestSendRCS_Success(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "rcs",
+		"--to", "01011111111",
+		"--from", "01012345678",
+		"--text", "RCS 메시지",
+		"--brand-id", "BRAND001",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	msg := captured.Messages[0]
+	if msg.RCSOptions == nil {
+		t.Fatal("rcsOptions should not be nil")
+	}
+	if msg.RCSOptions.BrandID != "BRAND001" {
+		t.Errorf("brandId: got %q", msg.RCSOptions.BrandID)
+	}
+	if msg.Text != "RCS 메시지" {
+		t.Errorf("text: got %q", msg.Text)
+	}
+}
+
+func TestSendRCS_WithTemplate(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "rcs",
+		"--to", "01011111111",
+		"--from", "01012345678",
+		"--brand-id", "BRAND001",
+		"--template-id", "RCSTPL001",
+		"--variables", `{"key":"value"}`,
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	rcs := captured.Messages[0].RCSOptions
+	if rcs.TemplateID != "RCSTPL001" {
+		t.Errorf("templateId: got %q", rcs.TemplateID)
+	}
+	if rcs.Variables["key"] != "value" {
+		t.Errorf("variables: got %v", rcs.Variables)
+	}
+}
+
+func TestSendRCS_MissingBrandID(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "rcs", "--to", "010", "--from", "011", "--text", "Hi"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --brand-id")
+	}
+	if !strings.Contains(err.Error(), "--brand-id") {
+		t.Errorf("error should mention --brand-id: %v", err)
+	}
+}
+
+func TestSendRCS_MissingFrom(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "rcs", "--to", "010", "--text", "Hi", "--brand-id", "B1"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --from")
+	}
+	if !strings.Contains(err.Error(), "--from") {
+		t.Errorf("error should mention --from: %v", err)
+	}
+}
+
+func TestSendRCS_MissingTo(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "rcs", "--from", "011", "--text", "Hi", "--brand-id", "B1"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --to")
+	}
+	if !strings.Contains(err.Error(), "--to") {
+		t.Errorf("error should mention --to: %v", err)
+	}
+}
+
+func TestSendRCS_TextRequiredWithoutTemplate(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "rcs", "--to", "010", "--from", "011", "--brand-id", "B1"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --text without --template-id")
+	}
+	if !strings.Contains(err.Error(), "--text") {
+		t.Errorf("error should mention --text: %v", err)
+	}
+}
+
+func TestSendRCS_TextOptionalWithTemplate(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "rcs",
+		"--to", "01011111111",
+		"--from", "01012345678",
+		"--brand-id", "B1",
+		"--template-id", "TPL1",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("RCS with template should not require --text: %v", err)
+	}
+}
+
+func TestSendRCS_WithSubject(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "rcs",
+		"--to", "01011111111",
+		"--from", "01012345678",
+		"--text", "RCS 메시지",
+		"--brand-id", "B1",
+		"--subject", "RCS 제목",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if captured.Messages[0].Subject != "RCS 제목" {
+		t.Errorf("subject: got %q", captured.Messages[0].Subject)
+	}
+}
+
+func TestSendRCS_WithMmsType(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "rcs",
+		"--to", "01011111111",
+		"--from", "01012345678",
+		"--text", "RCS MMS",
+		"--brand-id", "B1",
+		"--mms-type", "M3",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if captured.Messages[0].RCSOptions.MmsType != "M3" {
+		t.Errorf("mmsType: got %q", captured.Messages[0].RCSOptions.MmsType)
+	}
+}
+
+func TestSendRCS_CopyAllowed(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "rcs",
+		"--to", "01011111111",
+		"--from", "01012345678",
+		"--text", "Copy test",
+		"--brand-id", "B1",
+		"--copy-allowed",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	rcs := captured.Messages[0].RCSOptions
+	if rcs.CopyAllowed == nil || !*rcs.CopyAllowed {
+		t.Error("copyAllowed should be true")
+	}
+}
+
+func TestSendRCS_InvalidVariablesJSON(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "rcs",
+		"--to", "010",
+		"--from", "011",
+		"--text", "Hi",
+		"--brand-id", "B1",
+		"--variables", "{bad json}",
+	})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "변수 JSON 파싱 실패") {
+		t.Errorf("error should mention JSON parse failure: %v", err)
+	}
+}
+
+func TestSendRCS_WithImage(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+	var uploadType string
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/storage/v1/files"):
+			body, _ := io.ReadAll(r.Body)
+			var req types.UploadFileRequest
+			_ = json.Unmarshal(body, &req)
+			uploadType = req.Type
+
+			resp := types.UploadFileResponse{FileID: "RCS_IMG_001"}
+			data, _ := json.Marshal(resp)
+			w.WriteHeader(200)
+			_, _ = w.Write(data)
+
+		case strings.HasSuffix(r.URL.Path, "/messages/v4/send-many/detail"):
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &captured)
+
+			resp := mockSendResponse(1, 1, 0)
+			data, _ := json.Marshal(resp)
+			w.WriteHeader(200)
+			_, _ = w.Write(data)
+
+		default:
+			w.WriteHeader(404)
+		}
+	})
+	captureBuf(t)
+
+	tmpDir := t.TempDir()
+	imgPath := filepath.Join(tmpDir, "rcs.jpg")
+	_ = os.WriteFile(imgPath, []byte("fake-rcs-image"), 0644)
+
+	rootCmd.SetArgs([]string{
+		"send", "rcs",
+		"--to", "01011111111",
+		"--from", "01012345678",
+		"--text", "RCS with image",
+		"--brand-id", "B1",
+		"--image", imgPath,
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if uploadType != "RCS" {
+		t.Errorf("upload type should be RCS, got %q", uploadType)
+	}
+	if captured.Messages[0].ImageID != "RCS_IMG_001" {
+		t.Errorf("imageId: got %q", captured.Messages[0].ImageID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shared Helper Tests
+// ---------------------------------------------------------------------------
+
+func TestParseVariables_ValidJSON(t *testing.T) {
+	result, err := parseVariables(`{"#{이름}":"홍길동","#{금액}":"10000"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["#{이름}"] != "홍길동" {
+		t.Errorf("got %q for #{이름}", result["#{이름}"])
+	}
+	if result["#{금액}"] != "10000" {
+		t.Errorf("got %q for #{금액}", result["#{금액}"])
+	}
+}
+
+func TestParseVariables_EmptyString(t *testing.T) {
+	result, err := parseVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil for empty input, got %v", result)
+	}
+}
+
+func TestParseVariables_InvalidJSON(t *testing.T) {
+	_, err := parseVariables("{not valid}")
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "변수 JSON 파싱 실패") {
+		t.Errorf("error should mention parse failure: %v", err)
+	}
+}
+
+func TestParseVariables_NonStringValues(t *testing.T) {
+	_, err := parseVariables(`{"key":123}`)
+	if err == nil {
+		t.Fatal("expected error for non-string values")
+	}
+	if !strings.Contains(err.Error(), "문자열") {
+		t.Errorf("error should mention string requirement: %v", err)
+	}
+}
+
+func TestParseKakaoButtons_ValidJSON(t *testing.T) {
+	result, err := parseKakaoButtons(`[{"buttonType":"WL","buttonName":"링크","linkMo":"https://example.com"}]`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 button, got %d", len(result))
+	}
+	if result[0].ButtonType != "WL" {
+		t.Errorf("buttonType: got %q", result[0].ButtonType)
+	}
+}
+
+func FuzzParseVariables(f *testing.F) {
+	f.Add(`{"key":"value"}`)
+	f.Add(`{}`)
+	f.Add(`{"a":"b","c":"d"}`)
+	f.Add(`{invalid`)
+	f.Add(``)
+	f.Add(`null`)
+	f.Add(`[]`)
+
+	f.Fuzz(func(t *testing.T, input string) {
+		// Must not panic
+		_, _ = parseVariables(input)
+	})
+}
+
+func FuzzParseKakaoButtons(f *testing.F) {
+	f.Add(`[{"buttonType":"WL"}]`)
+	f.Add(`[]`)
+	f.Add(`{bad}`)
+	f.Add(``)
+	f.Add(`null`)
+
+	f.Fuzz(func(t *testing.T, input string) {
+		// Must not panic
+		_, _ = parseKakaoButtons(input)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Additional Validation Branch Tests (from review feedback)
+// ---------------------------------------------------------------------------
+
+func TestSendATA_MissingText(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "ata", "--to", "010", "--pfid", "PF1", "--template-id", "T1"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --text")
+	}
+	if !strings.Contains(err.Error(), "--text") {
+		t.Errorf("error should mention --text: %v", err)
+	}
+}
+
+func TestSendBMS_FreeMissingText(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms", "--free",
+		"--to", "010",
+		"--pfid", "PF1",
+		"--bubble-type", "TEXT",
+		"--targeting", "I",
+	})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --text in free mode")
+	}
+	if !strings.Contains(err.Error(), "--text") {
+		t.Errorf("error should mention --text: %v", err)
+	}
+}
+
+func TestSendBMS_FreeImageRequired(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	for _, bubbleType := range []string{"IMAGE", "WIDE"} {
+		t.Run(bubbleType, func(t *testing.T) {
+			rootCmd.SetArgs([]string{
+				"send", "bms", "--free",
+				"--to", "010",
+				"--pfid", "PF1",
+				"--bubble-type", bubbleType,
+				"--targeting", "I",
+				"--text", "테스트",
+			})
+			err := rootCmd.Execute()
+			if err == nil {
+				t.Fatalf("expected error for missing --image with %s", bubbleType)
+			}
+			if !strings.Contains(err.Error(), "--image") {
+				t.Errorf("error should mention --image: %v", err)
+			}
+		})
+	}
+}
+
+func TestSendBMS_ButtonsFlagConflict(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms", "--free",
+		"--to", "010",
+		"--pfid", "PF1",
+		"--bubble-type", "TEXT",
+		"--targeting", "I",
+		"--text", "테스트",
+		"--buttons", `[{"buttonType":"WL"}]`,
+		"--button-name", "중복",
+	})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for conflicting button flags")
+	}
+	if !strings.Contains(err.Error(), "--buttons") || !strings.Contains(err.Error(), "--button-name") {
+		t.Errorf("error should mention flag conflict: %v", err)
+	}
+}
+
+func TestSendBMS_FreeWithWideImage(t *testing.T) {
+	var mu sync.Mutex
+	var uploadType string
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/storage/v1/files"):
+			body, _ := io.ReadAll(r.Body)
+			var req types.UploadFileRequest
+			_ = json.Unmarshal(body, &req)
+			uploadType = req.Type
+
+			resp := types.UploadFileResponse{FileID: "WIDE_IMG_001"}
+			data, _ := json.Marshal(resp)
+			w.WriteHeader(200)
+			_, _ = w.Write(data)
+
+		case strings.HasSuffix(r.URL.Path, "/messages/v4/send-many/detail"):
+			resp := mockSendResponse(1, 1, 0)
+			data, _ := json.Marshal(resp)
+			w.WriteHeader(200)
+			_, _ = w.Write(data)
+
+		default:
+			w.WriteHeader(404)
+		}
+	})
+	captureBuf(t)
+
+	tmpDir := t.TempDir()
+	imgPath := filepath.Join(tmpDir, "wide.jpg")
+	_ = os.WriteFile(imgPath, []byte("fake-wide-image"), 0644)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms", "--free",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--bubble-type", "WIDE",
+		"--targeting", "I",
+		"--text", "와이드 메시지",
+		"--image", imgPath,
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if uploadType != "BMS_WIDE" {
+		t.Errorf("WIDE bubble type should upload with BMS_WIDE type, got %q", uploadType)
 	}
 }
