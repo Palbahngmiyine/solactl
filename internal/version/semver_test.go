@@ -3,6 +3,7 @@ package version
 import "testing"
 
 func TestParseSemver_Valid(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		input      string
 		major      int
@@ -46,6 +47,7 @@ func TestParseSemver_Valid(t *testing.T) {
 }
 
 func TestParseSemver_Invalid(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []string{
 		"",
 		"vx.y.z",
@@ -67,6 +69,7 @@ func TestParseSemver_Invalid(t *testing.T) {
 }
 
 func TestCompareSemver_MajorDifference(t *testing.T) {
+	t.Cleanup(func() {})
 	a := Semver{Major: 2, Minor: 0, Patch: 0}
 	b := Semver{Major: 1, Minor: 9, Patch: 9}
 	if got := CompareSemver(a, b); got != 1 {
@@ -78,6 +81,7 @@ func TestCompareSemver_MajorDifference(t *testing.T) {
 }
 
 func TestCompareSemver_MinorDifference(t *testing.T) {
+	t.Cleanup(func() {})
 	a := Semver{Major: 1, Minor: 3, Patch: 0}
 	b := Semver{Major: 1, Minor: 2, Patch: 9}
 	if got := CompareSemver(a, b); got != 1 {
@@ -86,6 +90,7 @@ func TestCompareSemver_MinorDifference(t *testing.T) {
 }
 
 func TestCompareSemver_PatchDifference(t *testing.T) {
+	t.Cleanup(func() {})
 	a := Semver{Major: 1, Minor: 2, Patch: 4}
 	b := Semver{Major: 1, Minor: 2, Patch: 3}
 	if got := CompareSemver(a, b); got != 1 {
@@ -94,6 +99,7 @@ func TestCompareSemver_PatchDifference(t *testing.T) {
 }
 
 func TestCompareSemver_Equal(t *testing.T) {
+	t.Cleanup(func() {})
 	a := Semver{Major: 1, Minor: 2, Patch: 3}
 	b := Semver{Major: 1, Minor: 2, Patch: 3}
 	if got := CompareSemver(a, b); got != 0 {
@@ -102,6 +108,7 @@ func TestCompareSemver_Equal(t *testing.T) {
 }
 
 func TestCompareSemver_PrereleaseVsStable(t *testing.T) {
+	t.Cleanup(func() {})
 	stable := Semver{Major: 1, Minor: 2, Patch: 3}
 	rc := Semver{Major: 1, Minor: 2, Patch: 3, Prerelease: "rc1"}
 
@@ -114,6 +121,7 @@ func TestCompareSemver_PrereleaseVsStable(t *testing.T) {
 }
 
 func TestCompareSemver_PrereleaseOrder(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		name string
 		a, b Semver
@@ -161,6 +169,7 @@ func TestCompareSemver_PrereleaseOrder(t *testing.T) {
 }
 
 func TestCompareSemver_PrereleaseEqual(t *testing.T) {
+	t.Cleanup(func() {})
 	a := Semver{Major: 1, Minor: 2, Patch: 3, Prerelease: "rc1"}
 	b := Semver{Major: 1, Minor: 2, Patch: 3, Prerelease: "rc1"}
 	if got := CompareSemver(a, b); got != 0 {
@@ -169,6 +178,7 @@ func TestCompareSemver_PrereleaseEqual(t *testing.T) {
 }
 
 func TestCompareSemver_CurrentGreaterThanLatest(t *testing.T) {
+	t.Cleanup(func() {})
 	current := Semver{Major: 2, Minor: 0, Patch: 0}
 	latest := Semver{Major: 1, Minor: 5, Patch: 0}
 
@@ -178,6 +188,7 @@ func TestCompareSemver_CurrentGreaterThanLatest(t *testing.T) {
 }
 
 func FuzzParseSemver(f *testing.F) {
+	f.Cleanup(func() {})
 	f.Add("v1.2.3")
 	f.Add("1.0.0-rc1")
 	f.Add("")

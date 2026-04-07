@@ -12,6 +12,7 @@ import (
 	"github.com/solapi/solactl/internal/version"
 	"github.com/solapi/solactl/pkg/client"
 	"github.com/solapi/solactl/pkg/types"
+	"github.com/solapi/solactl/pkg/validation"
 )
 
 var sendCmd = &cobra.Command{
@@ -25,7 +26,9 @@ var (
 	sendFlagFrom      string
 	sendFlagText      string
 	sendFlagScheduled string
-	sendFlagFile      string // CSV file for bulk sending
+	sendFlagFile           string // CSV file for bulk sending
+	sendFlagSkipValidation bool
+	sendFlagStrict         bool
 )
 
 func init() {
@@ -34,6 +37,8 @@ func init() {
 	sendCmd.PersistentFlags().StringVar(&sendFlagText, "text", "", "메시지 내용")
 	sendCmd.PersistentFlags().StringVar(&sendFlagScheduled, "scheduled", "", "예약 발송 시간 (ISO 8601)")
 	sendCmd.PersistentFlags().StringVar(&sendFlagFile, "file", "", "수신자 CSV 파일 경로")
+	sendCmd.PersistentFlags().BoolVar(&sendFlagSkipValidation, "skip-validation", false, "클라이언트 사이드 검증 건너뛰기")
+	sendCmd.PersistentFlags().BoolVar(&sendFlagStrict, "strict", false, "엄격 검증 모드 활성화")
 
 	rootCmd.AddCommand(sendCmd)
 }
@@ -56,11 +61,37 @@ func parseRecipients(to string) []string {
 	return result
 }
 
-// sendMessages builds a SendRequest with the agent and posts to send-many/detail.
+// sendMessages validates and sends messages via the API.
 // If the message list exceeds maxBatchSize, it auto-splits into multiple API calls.
 func sendMessages(c *client.Client, msgs []types.Message) error {
+	// Client-side validation (skip with --skip-validation)
+	if !sendFlagSkipValidation {
+		opts := validation.Options{
+			Strict:         sendFlagStrict,
+			AutoTypeDetect: true,
+		}
+		if errs := validation.ValidateMessages(msgs, opts); errs != nil {
+			p := printer()
+			fmt.Fprintf(out(), "검증 오류 %d건:\n", len(errs))
+			headers := []string{"번호", "필드", "오류코드", "메시지"}
+			var rows [][]string
+			for _, e := range errs {
+				rows = append(rows, []string{
+					fmt.Sprintf("[%d]", e.Index),
+					e.Field,
+					e.Code,
+					e.Message,
+				})
+			}
+			p.FormatTable(headers, rows)
+			return fmt.Errorf("검증 실패: %d건의 오류가 발견되었습니다", len(errs))
+		}
+	}
+
 	showList := true
 	agent := types.DefaultAgent(version.Version)
+	totalBatches := (len(msgs) + maxBatchSize - 1) / maxBatchSize
+	batchNum := 0
 
 	for start := 0; start < len(msgs); start += maxBatchSize {
 		end := start + maxBatchSize
@@ -68,6 +99,11 @@ func sendMessages(c *client.Client, msgs []types.Message) error {
 			end = len(msgs)
 		}
 		batch := msgs[start:end]
+		batchNum++
+
+		if totalBatches > 1 {
+			fmt.Fprintf(out(), "[%d/%d] %d건 발송 중...\n", batchNum, totalBatches, len(batch))
+		}
 
 		req := types.SendRequest{
 			Messages:        batch,
@@ -200,6 +236,40 @@ func buildMessagesFromFlags(msgBuilder func(to string) types.Message) ([]types.M
 		msgs = append(msgs, msgBuilder(to))
 	}
 	return msgs, nil
+}
+
+// resolveFrom returns the --from value if set, otherwise queries the senderid API
+// and auto-selects: 1 active → use it, 0 or 2+ → error with guidance.
+func resolveFrom(c *client.Client) (string, error) {
+	if sendFlagFrom != "" {
+		return sendFlagFrom, nil
+	}
+
+	raw, err := c.Get(ctx(), "senderid/v1/numbers/active", nil)
+	if err != nil {
+		return "", fmt.Errorf("발신번호(--from)를 입력하세요 (발신번호 조회 실패: %w)", err)
+	}
+
+	var senders []types.SenderID
+	if err := json.Unmarshal(raw, &senders); err != nil {
+		return "", fmt.Errorf("발신번호 자동 선택 실패 (응답 파싱 오류: %w). --from으로 직접 지정하세요", err)
+	}
+
+	switch len(senders) {
+	case 0:
+		return "", fmt.Errorf("등록된 활성 발신번호가 없습니다. solactl senderid list로 확인하세요")
+	case 1:
+		selected := senders[0].PhoneNumber
+		fmt.Fprintf(out(), "발신번호 자동 선택: %s\n", selected)
+		return selected, nil
+	default:
+		var lines []string
+		for _, s := range senders {
+			lines = append(lines, "  "+s.PhoneNumber)
+		}
+		return "", fmt.Errorf("활성 발신번호가 %d개입니다. --from으로 지정하세요:\n%s",
+			len(senders), strings.Join(lines, "\n"))
+	}
 }
 
 // boolPtr returns a pointer to the given bool value.

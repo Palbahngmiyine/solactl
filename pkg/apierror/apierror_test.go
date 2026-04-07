@@ -8,6 +8,7 @@ import (
 )
 
 func TestClassify_APIErrors(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		name         string
 		err          *APIError
@@ -124,6 +125,7 @@ func TestClassify_APIErrors(t *testing.T) {
 }
 
 func TestClassify_GenericErrors(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		name         string
 		err          error
@@ -194,6 +196,7 @@ func TestClassify_GenericErrors(t *testing.T) {
 }
 
 func TestClassify_Nil(t *testing.T) {
+	t.Cleanup(func() {})
 	got := Classify(nil)
 	if got != nil {
 		t.Errorf("Classify(nil) = %v, want nil", got)
@@ -201,6 +204,7 @@ func TestClassify_Nil(t *testing.T) {
 }
 
 func TestClassifiedError_Unwrap(t *testing.T) {
+	t.Cleanup(func() {})
 	orig := fmt.Errorf("original error")
 	ce := &ClassifiedError{Original: orig, Category: CategoryUnknown, Message: "test"}
 
@@ -217,6 +221,7 @@ func TestClassifiedError_Unwrap(t *testing.T) {
 }
 
 func TestClassifiedError_Error(t *testing.T) {
+	t.Cleanup(func() {})
 	orig := fmt.Errorf("original message")
 	ce := &ClassifiedError{Original: orig, Category: CategoryAuth, Message: "인증 실패"}
 	if ce.Error() != "original message" {
@@ -225,6 +230,7 @@ func TestClassifiedError_Error(t *testing.T) {
 }
 
 func TestClassify_WrappedAPIError(t *testing.T) {
+	t.Cleanup(func() {})
 	apiErr := &APIError{HTTPStatus: 401, ErrorCode: "Unauthorized", ErrorMessage: "bad"}
 	wrapped := fmt.Errorf("HTTP request failed: %w", apiErr)
 
@@ -235,6 +241,7 @@ func TestClassify_WrappedAPIError(t *testing.T) {
 }
 
 func TestClassify_AllCategoriesHaveNonEmptyMessage(t *testing.T) {
+	t.Cleanup(func() {})
 	testErrors := []error{
 		&APIError{HTTPStatus: 401, ErrorCode: "Unauthorized", ErrorMessage: "x"},
 		&APIError{HTTPStatus: 403, ErrorCode: "Forbidden", ErrorMessage: "x"},
@@ -257,6 +264,7 @@ func TestClassify_AllCategoriesHaveNonEmptyMessage(t *testing.T) {
 }
 
 func TestClassify_APIError_AllFieldsEmpty(t *testing.T) {
+	t.Cleanup(func() {})
 	input := &APIError{}
 	ce := Classify(input)
 
@@ -272,6 +280,7 @@ func TestClassify_APIError_AllFieldsEmpty(t *testing.T) {
 }
 
 func TestClassify_Unauthorized_ByCodeOnly(t *testing.T) {
+	t.Cleanup(func() {})
 	input := &APIError{ErrorCode: "Unauthorized", ErrorMessage: "bad creds"}
 	ce := Classify(input)
 
@@ -281,6 +290,7 @@ func TestClassify_Unauthorized_ByCodeOnly(t *testing.T) {
 }
 
 func TestClassify_Forbidden_ByCodeOnly(t *testing.T) {
+	t.Cleanup(func() {})
 	input := &APIError{ErrorCode: "Forbidden", ErrorMessage: "no access"}
 	ce := Classify(input)
 
@@ -290,6 +300,7 @@ func TestClassify_Forbidden_ByCodeOnly(t *testing.T) {
 }
 
 func TestClassify_BadRequest_ByCodeOnly(t *testing.T) {
+	t.Cleanup(func() {})
 	input := &APIError{ErrorCode: "BadRequest", ErrorMessage: "need title"}
 	ce := Classify(input)
 
@@ -302,6 +313,7 @@ func TestClassify_BadRequest_ByCodeOnly(t *testing.T) {
 }
 
 func TestAPIError_Error_WithErrorCode(t *testing.T) {
+	t.Cleanup(func() {})
 	e := &APIError{ErrorCode: "BadRequest", ErrorMessage: "invalid input"}
 	if e.Error() != "BadRequest: invalid input" {
 		t.Errorf("Error() = %q, want %q", e.Error(), "BadRequest: invalid input")
@@ -309,6 +321,7 @@ func TestAPIError_Error_WithErrorCode(t *testing.T) {
 }
 
 func TestAPIError_Error_WithMessageOnly(t *testing.T) {
+	t.Cleanup(func() {})
 	e := &APIError{ErrorMessage: "something went wrong"}
 	if e.Error() != "something went wrong" {
 		t.Errorf("Error() = %q, want %q", e.Error(), "something went wrong")
@@ -316,6 +329,7 @@ func TestAPIError_Error_WithMessageOnly(t *testing.T) {
 }
 
 func TestAPIError_Error_StatusOnly(t *testing.T) {
+	t.Cleanup(func() {})
 	e := &APIError{HTTPStatus: 500}
 	if e.Error() != "HTTP 500" {
 		t.Errorf("Error() = %q, want %q", e.Error(), "HTTP 500")
@@ -323,6 +337,7 @@ func TestAPIError_Error_StatusOnly(t *testing.T) {
 }
 
 func TestAPIError_Error_Empty(t *testing.T) {
+	t.Cleanup(func() {})
 	e := &APIError{}
 	if e.Error() != "HTTP 0" {
 		t.Errorf("Error() = %q, want %q", e.Error(), "HTTP 0")
@@ -330,6 +345,7 @@ func TestAPIError_Error_Empty(t *testing.T) {
 }
 
 func TestClassify_HintContainsSolactl(t *testing.T) {
+	t.Cleanup(func() {})
 	// Auth error hints should reference solactl, not colactl
 	e := &APIError{HTTPStatus: 401, ErrorCode: "Unauthorized", ErrorMessage: "bad"}
 	ce := Classify(e)
@@ -355,6 +371,7 @@ func searchSubstring(s, sub string) bool {
 }
 
 func TestClassify_Idempotent(t *testing.T) {
+	t.Cleanup(func() {})
 	apiErr := &APIError{HTTPStatus: 429, ErrorCode: "TooManyRequests", ErrorMessage: "slow down"}
 
 	first := Classify(apiErr)
@@ -372,6 +389,7 @@ func TestClassify_Idempotent(t *testing.T) {
 }
 
 func TestClassify_HTTPStatusBoundaries(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		status       int
 		wantCategory Category
@@ -411,6 +429,7 @@ func TestClassify_HTTPStatusBoundaries(t *testing.T) {
 }
 
 func TestClassify_WrappedError(t *testing.T) {
+	t.Cleanup(func() {})
 	apiErr := &APIError{HTTPStatus: 403, ErrorCode: "Forbidden", ErrorMessage: "no access"}
 	wrapped := fmt.Errorf("context: %w", apiErr)
 
@@ -433,6 +452,7 @@ func TestClassify_WrappedError(t *testing.T) {
 }
 
 func TestClassify_Concurrent(t *testing.T) {
+	t.Cleanup(func() {})
 	apiErr := &APIError{HTTPStatus: 500, ErrorCode: "InternalServerError", ErrorMessage: "oops"}
 
 	const goroutines = 100
@@ -465,6 +485,7 @@ func TestClassify_Concurrent(t *testing.T) {
 }
 
 func FuzzClassifyGeneric(f *testing.F) {
+	f.Cleanup(func() {})
 	f.Add("connection refused")
 	f.Add("no such host")
 	f.Add("context deadline exceeded")
@@ -491,6 +512,7 @@ func FuzzClassifyGeneric(f *testing.F) {
 }
 
 func TestAPIError_Error_AllCombinations(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		name         string
 		err          APIError

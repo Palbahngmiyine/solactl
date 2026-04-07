@@ -7,6 +7,7 @@ import (
 )
 
 func TestDefaultAgent(t *testing.T) {
+	t.Cleanup(func() {})
 	a := DefaultAgent("1.0.0")
 	if a.SDKVersion != "solactl/1.0.0" {
 		t.Errorf("SDKVersion: got %q", a.SDKVersion)
@@ -17,6 +18,7 @@ func TestDefaultAgent(t *testing.T) {
 }
 
 func TestSendRequest_JSON(t *testing.T) {
+	t.Cleanup(func() {})
 	show := true
 	req := SendRequest{
 		Messages: []Message{
@@ -47,6 +49,7 @@ func TestSendRequest_JSON(t *testing.T) {
 }
 
 func TestMessage_OmitsEmptyFields(t *testing.T) {
+	t.Cleanup(func() {})
 	msg := Message{To: "01012345678"}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -67,6 +70,7 @@ func TestMessage_OmitsEmptyFields(t *testing.T) {
 }
 
 func TestMessage_WithKakaoOptions(t *testing.T) {
+	t.Cleanup(func() {})
 	msg := Message{
 		To:   "01012345678",
 		From: "029999999",
@@ -94,6 +98,7 @@ func TestMessage_WithKakaoOptions(t *testing.T) {
 }
 
 func TestMessage_WithRCSOptions(t *testing.T) {
+	t.Cleanup(func() {})
 	msg := Message{
 		To:   "01012345678",
 		Text: "RCS test",
@@ -119,6 +124,7 @@ func TestMessage_WithRCSOptions(t *testing.T) {
 }
 
 func TestSendResponse_Unmarshal(t *testing.T) {
+	t.Cleanup(func() {})
 	raw := `{
 		"groupInfo": {
 			"count": {"total": 1, "registeredSuccess": 1},
@@ -149,6 +155,7 @@ func TestSendResponse_Unmarshal(t *testing.T) {
 }
 
 func TestUploadFileRequest_JSON(t *testing.T) {
+	t.Cleanup(func() {})
 	req := UploadFileRequest{
 		File: "base64data==",
 		Type: "MMS",
@@ -168,6 +175,7 @@ func TestUploadFileRequest_JSON(t *testing.T) {
 // SenderID tests
 
 func TestSenderID_DisplayStatus(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		status string
 		want   string
@@ -185,6 +193,7 @@ func TestSenderID_DisplayStatus(t *testing.T) {
 }
 
 func TestSenderID_DisplayMethod(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		method string
 		want   string
@@ -201,6 +210,7 @@ func TestSenderID_DisplayMethod(t *testing.T) {
 }
 
 func TestSenderID_DisplayExpireAt(t *testing.T) {
+	t.Cleanup(func() {})
 	tests := []struct {
 		expireAt string
 		want     string
@@ -219,6 +229,7 @@ func TestSenderID_DisplayExpireAt(t *testing.T) {
 }
 
 func TestSenderIDInfo_Unmarshal(t *testing.T) {
+	t.Cleanup(func() {})
 	raw := `{
 		"accountId": "ACC123",
 		"limit": 5,
@@ -244,6 +255,7 @@ func TestSenderIDInfo_Unmarshal(t *testing.T) {
 }
 
 func FuzzMessageJSON(f *testing.F) {
+	f.Cleanup(func() {})
 	f.Add(`{"to":"010","from":"029","text":"hi"}`)
 	f.Add(`{}`)
 	f.Add(`{"to":"","kakaoOptions":{"pfId":"test"}}`)

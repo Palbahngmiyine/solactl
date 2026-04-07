@@ -5,11 +5,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/solapi/solactl/internal/version"
 	"github.com/solapi/solactl/pkg/client"
 	"github.com/solapi/solactl/pkg/config"
 	"github.com/solapi/solactl/pkg/logger"
@@ -103,7 +105,9 @@ func newClient() (*client.Client, error) {
 		return nil, err
 	}
 	logger.Debug("SOLAPI 클라이언트 생성: %s", client.BaseURL)
-	return client.New(cfg.APIKey, cfg.APISecret), nil
+	c := client.New(cfg.APIKey, cfg.APISecret)
+	c.UserAgent = "solactl/" + version.Version + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
+	return c, nil
 }
 
 // out returns the current output writer, falling back to os.Stdout.

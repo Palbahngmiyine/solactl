@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"time"
 
@@ -24,12 +25,13 @@ const BaseURL = "https://api.solapi.com"
 
 // Client is an HTTP client for SOLAPI REST endpoints.
 type Client struct {
-	HTTPClient  *http.Client
-	APIKey      string
-	APISecret   string
-	MaxRetries  int
-	BaseDelay   time.Duration
+	HTTPClient      *http.Client
+	APIKey          string
+	APISecret       string
+	MaxRetries      int
+	BaseDelay       time.Duration
 	BaseURLOverride string // If set, used instead of the BaseURL constant.
+	UserAgent       string // User-Agent header value. Set by caller.
 }
 
 // baseURL returns the effective base URL for API requests.
@@ -90,6 +92,11 @@ func (c *Client) executeWithRetry(ctx context.Context, method, rawURL string, bo
 	var lastErr error
 
 	for attempt := 0; attempt <= c.MaxRetries; attempt++ {
+		// Short-circuit if context is already expired
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		if attempt > 0 {
 			delay := c.BaseDelay * time.Duration(1<<(attempt-1))
 			var jitter time.Duration
@@ -143,6 +150,12 @@ func (c *Client) doRequest(ctx context.Context, method, rawURL string, body []by
 		return nil, fmt.Errorf("generating authorization: %w", err)
 	}
 	req.Header.Set("Authorization", authHeader)
+
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	} else {
+		req.Header.Set("User-Agent", "solactl/unknown ("+runtime.GOOS+"/"+runtime.GOARCH+")")
+	}
 
 	logger.Debug("--> %s %s", method, rawURL)
 

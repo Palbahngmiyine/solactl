@@ -3,6 +3,7 @@ package version
 import "testing"
 
 func TestVersion_NonEmpty(t *testing.T) {
+	t.Cleanup(func() {})
 	fields := []struct {
 		name  string
 		value string
@@ -22,6 +23,7 @@ func TestVersion_NonEmpty(t *testing.T) {
 }
 
 func TestVersion_DevDefault(t *testing.T) {
+	t.Cleanup(func() {})
 	// When run via `go test` without ldflags, Version should be "dev"
 	// because debug.ReadBuildInfo().Main.Version is "(devel)" in test mode.
 	// If built with module info, it could be a real version string.
