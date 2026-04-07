@@ -47,7 +47,7 @@ func runSendMMS(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("발신번호(--from)를 입력하세요")
 	}
 
-	imageID, err := uploadImage(c, sendMMSFlagImage)
+	imageID, err := uploadImage(c, sendMMSFlagImage, "MMS")
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func runSendMMS(cmd *cobra.Command, args []string) error {
 
 // uploadImage reads a local file, base64-encodes it, and uploads to the SOLAPI
 // storage endpoint, returning the file ID.
-func uploadImage(c *client.Client, filePath string) (string, error) {
+func uploadImage(c *client.Client, filePath, fileType string) (string, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("이미지 파일 읽기 실패: %w", err)
@@ -79,7 +79,7 @@ func uploadImage(c *client.Client, filePath string) (string, error) {
 	encoded := base64.StdEncoding.EncodeToString(data)
 	req := types.UploadFileRequest{
 		File: encoded,
-		Type: "MMS",
+		Type: fileType,
 		Name: filepath.Base(filePath),
 	}
 
