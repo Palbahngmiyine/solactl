@@ -1937,10 +1937,10 @@ func TestSendATA_CSVBulk(t *testing.T) {
 	rootCmd.SetArgs([]string{
 		"send", "ata",
 		"--file", csvPath,
+		"--from", "0211111111",
 		"--pfid", "PF1",
 		"--template-id", "T1",
 		"--text", "안녕하세요 {{name}}님",
-		"--to", "dummy", // required by parseRecipients but overridden by CSV
 	})
 	err := rootCmd.Execute()
 	if err != nil {
@@ -2259,6 +2259,48 @@ func TestSendBMS_FreeWithAdFlag(t *testing.T) {
 	ko := captured.Messages[0].KakaoOptions
 	if ko.AdFlag == nil || !*ko.AdFlag {
 		t.Error("adFlag should be true")
+	}
+}
+
+func TestSendBMS_TemplateWithAdFlag(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &captured)
+		mu.Unlock()
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "bms",
+		"--to", "01011111111",
+		"--pfid", "PF1",
+		"--template-id", "TMPL1",
+		"--targeting", "I",
+		"--ad",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	ko := captured.Messages[0].KakaoOptions
+	if ko.AdFlag == nil || !*ko.AdFlag {
+		t.Error("adFlag should be true in template mode")
+	}
+	if ko.TemplateID != "TMPL1" {
+		t.Errorf("templateId should be TMPL1, got %s", ko.TemplateID)
 	}
 }
 

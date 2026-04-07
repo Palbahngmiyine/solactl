@@ -35,6 +35,7 @@ var (
 	executablePathFunc    = os.Executable
 	githubBaseURL         = "https://api.github.com"
 	maxExtractSize  int64 = 100 * 1024 * 1024 // 100MB
+	copyFileFunc          = copyFile
 )
 
 type githubRelease struct {
@@ -177,7 +178,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	// Copy new binary to the original path
-	if err := copyFile(extractedPath, execPath, filePerm); err != nil {
+	if err := copyFileFunc(extractedPath, execPath, filePerm); err != nil {
 		// Remove partial file before rollback (required on Windows where
 		// os.Rename cannot replace an existing destination)
 		_ = os.Remove(execPath)
@@ -214,7 +215,8 @@ func downloadFile(reqCtx context.Context, client *http.Client, url, destPath str
 		return err
 	}
 
-	n, err := io.Copy(f, io.LimitReader(resp.Body, maxExtractSize+1))
+	lr := io.LimitReader(resp.Body, maxExtractSize+1)
+	n, err := io.Copy(f, lr)
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
@@ -222,6 +224,7 @@ func downloadFile(reqCtx context.Context, client *http.Client, url, destPath str
 		return err
 	}
 	if n > maxExtractSize {
+		_ = os.Remove(destPath)
 		return fmt.Errorf("다운로드 크기가 한계(%d bytes)를 초과합니다", maxExtractSize)
 	}
 	return nil
