@@ -60,6 +60,3 @@ solactl balance
 
 자세한 사용법은 `solactl --help` 또는 각 서브커맨드의 `--help`를 참조하세요.
 
-## 라이선스
-
-Copyright (c) SOLAPI. All rights reserved.
