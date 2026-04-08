@@ -24,7 +24,7 @@ func (ve ValidationErrors) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "검증 오류 %d건", len(ve))
 	for _, e := range ve {
-		fmt.Fprintf(&b, "\n[%d] %s (%s): %s", e.Index, e.Field, e.Code, e.Message)
+		fmt.Fprintf(&b, "\n[%d] %s (%s): %s", e.Index+1, e.Field, e.Code, e.Message)
 	}
 	return b.String()
 }

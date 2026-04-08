@@ -17,7 +17,8 @@ func TestNormalizePhone(t *testing.T) {
 		{name: "with_spaces", input: "010 1234 5678", want: "01012345678"},
 		{name: "with_parens", input: "(02) 999-9999", want: "029999999"},
 		{name: "with_plus", input: "+82-10-1234-5678", want: "+821012345678"},
-		{name: "mixed_formatting", input: "(+82) 10-1234-5678", want: "821012345678"},
+		{name: "mixed_formatting", input: "(+82) 10-1234-5678", want: "+821012345678"},
+		{name: "leading_space_plus", input: " +821012345678", want: "+821012345678"},
 		{name: "letters_stripped", input: "010abc5678", want: "0105678"},
 		{name: "symbols_stripped", input: "010#1234*5678", want: "01012345678"},
 		{name: "plus_only_at_start", input: "82+10", want: "8210"},
@@ -59,9 +60,9 @@ func TestParsePhone_Valid(t *testing.T) {
 		{name: "korean_mobile_with_country_prepend_0", input: "+82-10-9999-8888", wantNumber: "01099998888", wantCountry: "82"},
 		{name: "us_number_passthrough", input: "+1-555-123-4567", wantNumber: "15551234567", wantCountry: ""},
 		{name: "uk_number_passthrough", input: "+44-20-1234-5678", wantNumber: "442012345678", wantCountry: ""},
-		// Parenthesized +82: the '(' strips the leading '+' position, so
-		// the number is treated as domestic without country code.
-		{name: "parens_82_domestic", input: "(+82) 10-1234-5678", wantNumber: "821012345678", wantCountry: ""},
+		// Parenthesized +82: leading '+' is preserved (b.Len()==0 check),
+		// so it's correctly parsed as international +82 with 0-prepend.
+		{name: "parens_82_international", input: "(+82) 10-1234-5678", wantNumber: "01012345678", wantCountry: "82"},
 	}
 
 	for _, tt := range tests {

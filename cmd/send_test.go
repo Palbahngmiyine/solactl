@@ -89,6 +89,7 @@ func setupSendTest(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -100,6 +101,14 @@ func captureBuf(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	outWriter = &buf
+	return &buf
+}
+
+// captureErrBuf sets up stderr capture and returns the buffer.
+func captureErrBuf(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	errWriter = &buf
 	return &buf
 }
 
@@ -891,6 +900,7 @@ func TestSendMessages_BatchSplit(t *testing.T) {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -1346,6 +1356,7 @@ func TestSendMessages_ZeroMessages(t *testing.T) {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -1399,6 +1410,7 @@ func TestSendMessages_ExactlyMaxBatch(t *testing.T) {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -1456,6 +1468,7 @@ func TestSendMessages_MultipleBatches(t *testing.T) {
 
 	resetSendFlags()
 	captureBuf(t)
+	errBuf := captureErrBuf(t)
 
 	c := &client.Client{
 		HTTPClient:      ts.Client(),
@@ -1469,6 +1482,7 @@ func TestSendMessages_MultipleBatches(t *testing.T) {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -1501,6 +1515,15 @@ func TestSendMessages_MultipleBatches(t *testing.T) {
 		if batchSizes[i] != want {
 			t.Errorf("batch[%d] size: got %d, want %d", i, batchSizes[i], want)
 		}
+	}
+
+	// Verify batch progress messages go to stderr
+	stderrOutput := errBuf.String()
+	if !strings.Contains(stderrOutput, "[1/3]") {
+		t.Errorf("expected batch progress [1/3] on stderr, got: %s", stderrOutput)
+	}
+	if !strings.Contains(stderrOutput, "[3/3]") {
+		t.Errorf("expected batch progress [3/3] on stderr, got: %s", stderrOutput)
 	}
 }
 
@@ -3099,5 +3122,46 @@ func TestSendBMS_FreeWithWideImage(t *testing.T) {
 
 	if uploadType != "BMS_WIDE" {
 		t.Errorf("WIDE bubble type should upload with BMS_WIDE type, got %q", uploadType)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stderr output tests
+// ---------------------------------------------------------------------------
+
+func TestSendMessages_ValidationError_Stderr(t *testing.T) {
+	resetSendFlags()
+	sendFlagSkipValidation = false
+
+	outBuf := captureBuf(t)
+	errBuf := captureErrBuf(t)
+	t.Cleanup(func() {
+		outWriter = nil
+		errWriter = nil
+		resetSendFlags()
+	})
+
+	// Message with empty "to" triggers validation error
+	msgs := []types.Message{{To: "", From: "01012345678", Text: "test"}}
+	c := &client.Client{APIKey: "k", APISecret: "s"}
+
+	err := sendMessages(c, msgs)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	// Validation header and table should appear on stderr
+	stderrOut := errBuf.String()
+	if !strings.Contains(stderrOut, "검증 오류") {
+		t.Errorf("expected validation header on stderr, got: %s", stderrOut)
+	}
+	if !strings.Contains(stderrOut, "1010") {
+		t.Errorf("expected error code in stderr table, got: %s", stderrOut)
+	}
+
+	// stdout should NOT contain validation output
+	stdoutOut := outBuf.String()
+	if strings.Contains(stdoutOut, "검증 오류") {
+		t.Errorf("validation output should not appear on stdout, got: %s", stdoutOut)
 	}
 }

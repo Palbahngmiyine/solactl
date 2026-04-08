@@ -34,6 +34,10 @@ var (
 // outWriter is the destination for command output. Tests override this.
 var outWriter io.Writer
 
+// errWriter is the destination for informational/diagnostic output (stderr).
+// Tests override this to capture stderr messages.
+var errWriter io.Writer
+
 // clientOverride is set by tests to bypass loadConfig and use a test client.
 var clientOverride *client.Client
 
@@ -116,6 +120,14 @@ func out() io.Writer {
 		return outWriter
 	}
 	return os.Stdout
+}
+
+// errOut returns the current error/diagnostic writer, falling back to os.Stderr.
+func errOut() io.Writer {
+	if errWriter != nil {
+		return errWriter
+	}
+	return os.Stderr
 }
 
 // printer returns a configured output printer.

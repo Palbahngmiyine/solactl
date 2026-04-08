@@ -94,7 +94,7 @@ func checkDuplicateRecipients(msgs []types.Message) []ValidationError {
 		if firstIdx, ok := seen[msg.To]; ok {
 			errs = append(errs, ValidationError{
 				Index: i, Field: "to", Code: "1026",
-				Message: "중복 수신번호입니다 (메시지 #" + strconv.Itoa(firstIdx) + "과 동일)",
+				Message: "중복 수신번호입니다 (메시지 #" + strconv.Itoa(firstIdx+1) + "과 동일)",
 			})
 		} else {
 			seen[msg.To] = i

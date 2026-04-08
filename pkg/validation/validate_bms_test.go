@@ -306,6 +306,23 @@ func TestValidateBMS_COMMERCE(t *testing.T) {
 			t.Error("expected buttonType error for non-WL/AL")
 		}
 	})
+
+	t.Run("empty_buttonType_rejected", func(t *testing.T) {
+		t.Cleanup(func() {})
+		ko := freeBMSKakaoOptions("COMMERCE")
+		ko.Buttons = []types.KakaoButton{{ButtonType: "", ButtonName: "클릭"}}
+		msg := types.Message{To: "01012345678", ImageID: "img-1", KakaoOptions: ko}
+		errs := validateBMS(&msg, 0, "BMS_COMMERCE", Options{})
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e.Field, "buttonType") {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected buttonType error for empty buttonType")
+		}
+	})
 }
 
 func TestValidateBMS_PREMIUM_VIDEO(t *testing.T) {

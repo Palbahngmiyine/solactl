@@ -8,17 +8,20 @@ import (
 var phoneDigitsOnly = regexp.MustCompile(`^[0-9]{5,25}$`)
 
 // NormalizePhone strips all characters except digits and leading '+' from
-// a phone number string. Formatting characters (-, space, parentheses),
-// non-ASCII characters, and any other non-digit characters are removed.
+// a phone number string. A '+' is considered "leading" if no digits have
+// been emitted yet, even if non-digit characters precede it in the input
+// (e.g., "(+82)" preserves the '+'). Formatting characters (-, space,
+// parentheses), non-ASCII characters, and any other non-digit characters
+// are removed.
 func NormalizePhone(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
-	for i, r := range s {
+	for _, r := range s {
 		switch {
 		case r >= '0' && r <= '9':
 			b.WriteRune(r)
-		case r == '+' && i == 0:
-			// keep leading '+' only at position 0
+		case r == '+' && b.Len() == 0:
+			// keep leading '+' only when nothing has been written yet
 			b.WriteRune(r)
 		default:
 			// drop all other characters (formatting, letters, symbols, non-ASCII)
@@ -79,7 +82,8 @@ func ParsePhone(s string) (number string, country string, err error) {
 
 // extractCountryCode extracts the country code from a digit string after '+'.
 // Supports Korean country code "82" explicitly. For other prefixes,
-// uses a 2-digit default (server validates the actual country code).
+// returns empty to indicate no client-side country code extraction
+// (server handles validation).
 func extractCountryCode(s string) (country, rest string) {
 	if len(s) < 2 {
 		return "", ""

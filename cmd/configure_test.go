@@ -90,7 +90,9 @@ func TestConfigureShow_NoConfig(t *testing.T) {
 
 	var buf bytes.Buffer
 	outWriter = &buf
-	t.Cleanup(func() { outWriter = nil })
+	var errBuf bytes.Buffer
+	errWriter = &errBuf
+	t.Cleanup(func() { outWriter = nil; errWriter = nil })
 
 	rootCmd.SetArgs([]string{"configure", "show"})
 	err := rootCmd.Execute()
@@ -102,9 +104,13 @@ func TestConfigureShow_NoConfig(t *testing.T) {
 	if !strings.Contains(output, "API Key") {
 		t.Errorf("expected API Key label, got: %s", output)
 	}
-	// Should show warning about missing config
-	if !strings.Contains(output, "⚠") {
-		t.Errorf("expected warning for empty config, got: %s", output)
+	// Warning should go to stderr, not stdout
+	errOutput := errBuf.String()
+	if !strings.Contains(errOutput, "⚠") {
+		t.Errorf("expected warning for empty config on stderr, got: %s", errOutput)
+	}
+	if strings.Contains(output, "⚠") {
+		t.Errorf("warning should not appear on stdout, got: %s", output)
 	}
 	resetFlags()
 }
@@ -211,7 +217,9 @@ func TestConfigureShow_ValidationWarning(t *testing.T) {
 
 	var buf bytes.Buffer
 	outWriter = &buf
-	t.Cleanup(func() { outWriter = nil })
+	var errBuf bytes.Buffer
+	errWriter = &errBuf
+	t.Cleanup(func() { outWriter = nil; errWriter = nil })
 
 	rootCmd.SetArgs([]string{"configure", "show"})
 	err := rootCmd.Execute()
@@ -219,9 +227,13 @@ func TestConfigureShow_ValidationWarning(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	output := buf.String()
-	if !strings.Contains(output, "⚠") {
-		t.Errorf("expected validation warning (⚠) for empty API Key, got: %s", output)
+	errOutput := errBuf.String()
+	if !strings.Contains(errOutput, "⚠") {
+		t.Errorf("expected validation warning (⚠) for empty API Key on stderr, got: %s", errOutput)
+	}
+	stdoutOutput := buf.String()
+	if strings.Contains(stdoutOutput, "⚠") {
+		t.Errorf("warning should not appear on stdout, got: %s", stdoutOutput)
 	}
 	resetFlags()
 }

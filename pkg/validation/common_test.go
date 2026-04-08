@@ -213,6 +213,45 @@ func TestCheckDuplicateRecipients(t *testing.T) {
 	}
 }
 
+func TestCheckDuplicateRecipients_MessageContent(t *testing.T) {
+	t.Run("1_based_index_in_message", func(t *testing.T) {
+		t.Cleanup(func() {})
+		msgs := []types.Message{
+			{To: "01011111111"},
+			{To: "01022222222"},
+			{To: "01011111111"}, // duplicate of index 0
+		}
+		errs := checkDuplicateRecipients(msgs)
+		if len(errs) != 1 {
+			t.Fatalf("expected 1 error, got %d", len(errs))
+		}
+		if errs[0].Index != 2 {
+			t.Errorf("expected Index=2, got %d", errs[0].Index)
+		}
+		if !strings.Contains(errs[0].Message, "메시지 #1과 동일") {
+			t.Errorf("expected 1-based reference '메시지 #1과 동일', got %q", errs[0].Message)
+		}
+	})
+
+	t.Run("multiple_duplicates_1_based", func(t *testing.T) {
+		t.Cleanup(func() {})
+		msgs := []types.Message{
+			{To: "01011111111"}, // index 0
+			{To: "01011111111"}, // index 1, dup of 0
+			{To: "01011111111"}, // index 2, dup of 0
+		}
+		errs := checkDuplicateRecipients(msgs)
+		if len(errs) != 2 {
+			t.Fatalf("expected 2 errors, got %d", len(errs))
+		}
+		for _, e := range errs {
+			if !strings.Contains(e.Message, "메시지 #1과 동일") {
+				t.Errorf("expected 1-based reference to first occurrence (#1), got %q", e.Message)
+			}
+		}
+	})
+}
+
 func TestValidationErrors_Error(t *testing.T) {
 	t.Cleanup(func() {})
 
@@ -229,7 +268,7 @@ func TestValidationErrors_Error(t *testing.T) {
 		if !strings.Contains(got, "검증 오류 1건") {
 			t.Errorf("Error() = %q, want containing '검증 오류 1건'", got)
 		}
-		if !strings.Contains(got, "[0] to (1010): invalid") {
+		if !strings.Contains(got, "[1] to (1010): invalid") {
 			t.Errorf("Error() = %q, want containing error detail", got)
 		}
 	})

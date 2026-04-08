@@ -203,7 +203,7 @@ func validateBMSCommerce(msg *types.Message, idx int) []ValidationError {
 			})
 		}
 		for i, btn := range msg.KakaoOptions.Buttons {
-			if btn.ButtonType != "WL" && btn.ButtonType != "AL" && btn.ButtonType != "" {
+			if btn.ButtonType != "WL" && btn.ButtonType != "AL" {
 				errs = append(errs, ValidationError{
 					Index: idx, Field: fmt.Sprintf("kakaoOptions.buttons[%d].buttonType", i), Code: "1010",
 					Message: fmt.Sprintf("BMS_COMMERCE 버튼은 WL 또는 AL만 허용됩니다 (현재: %q)", btn.ButtonType),

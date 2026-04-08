@@ -11,6 +11,7 @@ import (
 
 	"github.com/solapi/solactl/internal/version"
 	"github.com/solapi/solactl/pkg/client"
+	"github.com/solapi/solactl/pkg/output"
 	"github.com/solapi/solactl/pkg/types"
 	"github.com/solapi/solactl/pkg/validation"
 )
@@ -71,13 +72,13 @@ func sendMessages(c *client.Client, msgs []types.Message) error {
 			AutoTypeDetect: true,
 		}
 		if errs := validation.ValidateMessages(msgs, opts); errs != nil {
-			p := printer()
-			fmt.Fprintf(out(), "검증 오류 %d건:\n", len(errs))
+			p := &output.Printer{Writer: errOut()}
+			fmt.Fprintf(errOut(), "검증 오류 %d건:\n", len(errs))
 			headers := []string{"번호", "필드", "오류코드", "메시지"}
 			var rows [][]string
 			for _, e := range errs {
 				rows = append(rows, []string{
-					fmt.Sprintf("[%d]", e.Index),
+					fmt.Sprintf("[%d]", e.Index+1),
 					e.Field,
 					e.Code,
 					e.Message,
@@ -102,7 +103,7 @@ func sendMessages(c *client.Client, msgs []types.Message) error {
 		batchNum++
 
 		if totalBatches > 1 {
-			fmt.Fprintf(out(), "[%d/%d] %d건 발송 중...\n", batchNum, totalBatches, len(batch))
+			fmt.Fprintf(errOut(), "[%d/%d] %d건 발송 중...\n", batchNum, totalBatches, len(batch))
 		}
 
 		req := types.SendRequest{
@@ -260,7 +261,7 @@ func resolveFrom(c *client.Client) (string, error) {
 		return "", fmt.Errorf("등록된 활성 발신번호가 없습니다. solactl senderid list로 확인하세요")
 	case 1:
 		selected := senders[0].PhoneNumber
-		fmt.Fprintf(out(), "발신번호 자동 선택: %s\n", selected)
+		fmt.Fprintf(errOut(), "발신번호 자동 선택: %s\n", selected)
 		return selected, nil
 	default:
 		var lines []string
