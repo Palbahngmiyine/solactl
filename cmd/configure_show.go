@@ -27,7 +27,7 @@ func init() {
 			)
 
 			if err := cfg.Validate(); err != nil {
-				_, _ = fmt.Fprintf(out(), "\n⚠ %v\n", err)
+				_, _ = fmt.Fprintf(errOut(), "\n⚠ %v\n", err)
 			}
 			return nil
 		},

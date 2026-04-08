@@ -26,6 +26,8 @@ func resetSendFlags() {
 	sendFlagText = ""
 	sendFlagScheduled = ""
 	sendFlagFile = ""
+	sendFlagSkipValidation = false
+	sendFlagStrict = false
 	sendLMSFlagSubject = ""
 	sendMMSFlagImage = ""
 	sendMMSFlagSubject = ""
@@ -87,6 +89,7 @@ func setupSendTest(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -98,6 +101,14 @@ func captureBuf(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	outWriter = &buf
+	return &buf
+}
+
+// captureErrBuf sets up stderr capture and returns the buffer.
+func captureErrBuf(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	errWriter = &buf
 	return &buf
 }
 
@@ -258,7 +269,14 @@ func TestSendSMS_MissingText(t *testing.T) {
 
 func TestSendSMS_MissingFrom(t *testing.T) {
 	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("server should not be called")
+		// resolveFrom calls senderid API when --from is not provided
+		if strings.Contains(r.URL.Path, "senderid") {
+			// Return empty list → 0 active senders → error
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		t.Fatal("send endpoint should not be called")
 	})
 	captureBuf(t)
 
@@ -266,9 +284,6 @@ func TestSendSMS_MissingFrom(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for missing --from")
-	}
-	if !strings.Contains(err.Error(), "--from") {
-		t.Errorf("error should mention --from: %v", err)
 	}
 }
 
@@ -659,7 +674,12 @@ func TestSendSMS_APIError(t *testing.T) {
 
 func TestSendLMS_MissingFrom(t *testing.T) {
 	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("server should not be called")
+		if strings.Contains(r.URL.Path, "senderid") {
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		t.Fatal("send endpoint should not be called")
 	})
 	captureBuf(t)
 
@@ -667,9 +687,6 @@ func TestSendLMS_MissingFrom(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for missing --from")
-	}
-	if !strings.Contains(err.Error(), "--from") {
-		t.Errorf("error should mention --from: %v", err)
 	}
 }
 
@@ -713,6 +730,68 @@ func TestSendSMS_FailedMessages(t *testing.T) {
 	}
 	if !strings.Contains(output, "01099999999") {
 		t.Errorf("output should show failed recipient: %s", output)
+	}
+}
+
+func TestSendSMS_PartialSuccessFailure(t *testing.T) {
+	// Test: 3 messages sent, 2 succeed, 1 fails (partial success)
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "senderid") {
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		resp := types.SendResponse{
+			GroupInfo: types.GroupInfo{
+				GroupID: "G_PARTIAL",
+				Status:  "SENDING",
+				Count: types.GroupCount{
+					Total:             3,
+					RegisteredSuccess: 2,
+					RegisteredFailed:  1,
+				},
+			},
+			FailedMessageList: []types.FailedMessage{
+				{
+					To:            "01033333333",
+					From:          "01012345678",
+					StatusCode:    "1010",
+					StatusMessage: "수신번호 형식 오류",
+				},
+			},
+		}
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+
+	buf := captureBuf(t)
+
+	rootCmd.SetArgs([]string{
+		"send", "sms",
+		"--to", "01011111111,01022222222,01033333333",
+		"--from", "01012345678",
+		"--text", "Hi",
+		"--skip-validation",
+	})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	// Should show both success and failure counts
+	if !strings.Contains(output, "등록 성공") {
+		t.Error("output should show registered success count")
+	}
+	if !strings.Contains(output, "등록 실패") {
+		t.Error("output should show registered failed count")
+	}
+	if !strings.Contains(output, "실패 메시지") {
+		t.Error("output should show failed messages section")
+	}
+	if !strings.Contains(output, "01033333333") {
+		t.Error("output should show the failed recipient")
 	}
 }
 
@@ -821,6 +900,7 @@ func TestSendMessages_BatchSplit(t *testing.T) {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -1160,7 +1240,12 @@ func TestPrintSendResult_EmptyFailedList(t *testing.T) {
 
 func TestSendSMS_AllFlagsMissing(t *testing.T) {
 	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("server should not be called")
+		if strings.Contains(r.URL.Path, "senderid") {
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		t.Fatal("send endpoint should not be called")
 	})
 	captureBuf(t)
 
@@ -1168,10 +1253,6 @@ func TestSendSMS_AllFlagsMissing(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when no flags provided")
-	}
-	// The first validation in runSendSMS (after file check) is --to.
-	if !strings.Contains(err.Error(), "--to") {
-		t.Errorf("error should mention --to as first missing flag, got: %v", err)
 	}
 }
 
@@ -1275,6 +1356,7 @@ func TestSendMessages_ZeroMessages(t *testing.T) {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -1328,6 +1410,7 @@ func TestSendMessages_ExactlyMaxBatch(t *testing.T) {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -1385,6 +1468,7 @@ func TestSendMessages_MultipleBatches(t *testing.T) {
 
 	resetSendFlags()
 	captureBuf(t)
+	errBuf := captureErrBuf(t)
 
 	c := &client.Client{
 		HTTPClient:      ts.Client(),
@@ -1398,6 +1482,7 @@ func TestSendMessages_MultipleBatches(t *testing.T) {
 	t.Cleanup(func() {
 		clientOverride = nil
 		outWriter = nil
+		errWriter = nil
 		resetSendFlags()
 	})
 
@@ -1430,6 +1515,15 @@ func TestSendMessages_MultipleBatches(t *testing.T) {
 		if batchSizes[i] != want {
 			t.Errorf("batch[%d] size: got %d, want %d", i, batchSizes[i], want)
 		}
+	}
+
+	// Verify batch progress messages go to stderr
+	stderrOutput := errBuf.String()
+	if !strings.Contains(stderrOutput, "[1/3]") {
+		t.Errorf("expected batch progress [1/3] on stderr, got: %s", stderrOutput)
+	}
+	if !strings.Contains(stderrOutput, "[3/3]") {
+		t.Errorf("expected batch progress [3/3] on stderr, got: %s", stderrOutput)
 	}
 }
 
@@ -2519,7 +2613,12 @@ func TestSendRCS_MissingBrandID(t *testing.T) {
 
 func TestSendRCS_MissingFrom(t *testing.T) {
 	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("server should not be called")
+		if strings.Contains(r.URL.Path, "senderid") {
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		t.Fatal("send endpoint should not be called")
 	})
 	captureBuf(t)
 
@@ -2527,9 +2626,6 @@ func TestSendRCS_MissingFrom(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for missing --from")
-	}
-	if !strings.Contains(err.Error(), "--from") {
-		t.Errorf("error should mention --from: %v", err)
 	}
 }
 
@@ -3026,5 +3122,46 @@ func TestSendBMS_FreeWithWideImage(t *testing.T) {
 
 	if uploadType != "BMS_WIDE" {
 		t.Errorf("WIDE bubble type should upload with BMS_WIDE type, got %q", uploadType)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stderr output tests
+// ---------------------------------------------------------------------------
+
+func TestSendMessages_ValidationError_Stderr(t *testing.T) {
+	resetSendFlags()
+	sendFlagSkipValidation = false
+
+	outBuf := captureBuf(t)
+	errBuf := captureErrBuf(t)
+	t.Cleanup(func() {
+		outWriter = nil
+		errWriter = nil
+		resetSendFlags()
+	})
+
+	// Message with empty "to" triggers validation error
+	msgs := []types.Message{{To: "", From: "01012345678", Text: "test"}}
+	c := &client.Client{APIKey: "k", APISecret: "s"}
+
+	err := sendMessages(c, msgs)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	// Validation header and table should appear on stderr
+	stderrOut := errBuf.String()
+	if !strings.Contains(stderrOut, "검증 오류") {
+		t.Errorf("expected validation header on stderr, got: %s", stderrOut)
+	}
+	if !strings.Contains(stderrOut, "1010") {
+		t.Errorf("expected error code in stderr table, got: %s", stderrOut)
+	}
+
+	// stdout should NOT contain validation output
+	stdoutOut := outBuf.String()
+	if strings.Contains(stdoutOut, "검증 오류") {
+		t.Errorf("validation output should not appear on stdout, got: %s", stdoutOut)
 	}
 }

@@ -5,11 +5,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/solapi/solactl/internal/version"
 	"github.com/solapi/solactl/pkg/client"
 	"github.com/solapi/solactl/pkg/config"
 	"github.com/solapi/solactl/pkg/logger"
@@ -31,6 +33,10 @@ var (
 
 // outWriter is the destination for command output. Tests override this.
 var outWriter io.Writer
+
+// errWriter is the destination for informational/diagnostic output (stderr).
+// Tests override this to capture stderr messages.
+var errWriter io.Writer
 
 // clientOverride is set by tests to bypass loadConfig and use a test client.
 var clientOverride *client.Client
@@ -103,7 +109,9 @@ func newClient() (*client.Client, error) {
 		return nil, err
 	}
 	logger.Debug("SOLAPI 클라이언트 생성: %s", client.BaseURL)
-	return client.New(cfg.APIKey, cfg.APISecret), nil
+	c := client.New(cfg.APIKey, cfg.APISecret)
+	c.UserAgent = "solactl/" + version.Version + " (" + runtime.GOOS + "/" + runtime.GOARCH + ")"
+	return c, nil
 }
 
 // out returns the current output writer, falling back to os.Stdout.
@@ -112,6 +120,14 @@ func out() io.Writer {
 		return outWriter
 	}
 	return os.Stdout
+}
+
+// errOut returns the current error/diagnostic writer, falling back to os.Stderr.
+func errOut() io.Writer {
+	if errWriter != nil {
+		return errWriter
+	}
+	return os.Stderr
 }
 
 // printer returns a configured output printer.

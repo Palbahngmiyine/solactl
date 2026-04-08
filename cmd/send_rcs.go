@@ -44,14 +44,16 @@ func runSendRCS(cmd *cobra.Command, args []string) error {
 	if sendFlagTo == "" && sendFlagFile == "" {
 		return fmt.Errorf("수신번호(--to)를 입력하세요")
 	}
-	if sendFlagFrom == "" {
-		return fmt.Errorf("발신번호(--from)를 입력하세요")
-	}
 	if sendRCSFlagBrandID == "" {
 		return fmt.Errorf("RCS 브랜드 ID(--brand-id)를 입력하세요")
 	}
 	if sendFlagText == "" && sendRCSFlagTemplateID == "" {
 		return fmt.Errorf("메시지 내용(--text)을 입력하세요 (또는 --template-id 사용)")
+	}
+
+	from, err := resolveFrom(c)
+	if err != nil {
+		return err
 	}
 
 	variables, err := parseVariables(sendRCSFlagVariables)
@@ -83,7 +85,7 @@ func runSendRCS(cmd *cobra.Command, args []string) error {
 	var msgs []types.Message
 
 	if sendFlagFile != "" {
-		msgs, err = loadCSVMessages(sendFlagFile, sendFlagFrom, sendFlagText)
+		msgs, err = loadCSVMessages(sendFlagFile, from, sendFlagText)
 		if err != nil {
 			return err
 		}
@@ -98,7 +100,7 @@ func runSendRCS(cmd *cobra.Command, args []string) error {
 		msgs, err = buildMessagesFromFlags(func(to string) types.Message {
 			return types.Message{
 				To:         to,
-				From:       sendFlagFrom,
+				From:       from,
 				Text:       sendFlagText,
 				Subject:    sendRCSFlagSubject,
 				ImageID:    imageID,

@@ -27,10 +27,11 @@ func runSendSMS(cmd *cobra.Command, args []string) error {
 	var msgs []types.Message
 
 	if sendFlagFile != "" {
-		if sendFlagFrom == "" {
-			return fmt.Errorf("발신번호(--from)를 입력하세요")
+		from, err := resolveFrom(c)
+		if err != nil {
+			return err
 		}
-		msgs, err = loadCSVMessages(sendFlagFile, sendFlagFrom, sendFlagText)
+		msgs, err = loadCSVMessages(sendFlagFile, from, sendFlagText)
 		if err != nil {
 			return err
 		}
@@ -41,14 +42,16 @@ func runSendSMS(cmd *cobra.Command, args []string) error {
 		if sendFlagText == "" {
 			return fmt.Errorf("메시지 내용(--text)을 입력하세요")
 		}
-		if sendFlagFrom == "" {
-			return fmt.Errorf("발신번호(--from)를 입력하세요")
+
+		from, err := resolveFrom(c)
+		if err != nil {
+			return err
 		}
 
 		msgs, err = buildMessagesFromFlags(func(to string) types.Message {
 			return types.Message{
 				To:   to,
-				From: sendFlagFrom,
+				From: from,
 				Text: sendFlagText,
 			}
 		})
