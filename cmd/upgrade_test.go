@@ -53,8 +53,8 @@ func buildTarGz(t *testing.T, binaryName string) []byte {
 	if _, err := tw.Write(content); err != nil {
 		t.Fatalf("write tar content: %v", err)
 	}
-	tw.Close()
-	gw.Close()
+	_ = tw.Close()
+	_ = gw.Close()
 	return buf.Bytes()
 }
 
@@ -506,8 +506,8 @@ func TestUpgrade_PathTraversalRejection(t *testing.T) {
 	}
 	_ = tw.WriteHeader(hdr)
 	_, _ = tw.Write(content)
-	tw.Close()
-	gw.Close()
+	_ = tw.Close()
+	_ = gw.Close()
 
 	assetName := "solactl_1.1.0_" + testOSArch() + ".tar.gz"
 	release := githubRelease{
@@ -557,8 +557,8 @@ func TestUpgrade_BinaryNotFoundInValidArchive(t *testing.T) {
 	}
 	_ = tw.WriteHeader(hdr)
 	_, _ = tw.Write(content)
-	tw.Close()
-	gw.Close()
+	_ = tw.Close()
+	_ = gw.Close()
 
 	assetName := "solactl_1.1.0_" + testOSArch() + ".tar.gz"
 	release := githubRelease{

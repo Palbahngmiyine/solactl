@@ -73,7 +73,7 @@ func sendMessages(c *client.Client, msgs []types.Message) error {
 		}
 		if errs := validation.ValidateMessages(msgs, opts); errs != nil {
 			p := &output.Printer{Writer: errOut()}
-			fmt.Fprintf(errOut(), "검증 오류 %d건:\n", len(errs))
+			_, _ = fmt.Fprintf(errOut(), "검증 오류 %d건:\n", len(errs))
 			headers := []string{"번호", "필드", "오류코드", "메시지"}
 			var rows [][]string
 			for _, e := range errs {
@@ -103,7 +103,7 @@ func sendMessages(c *client.Client, msgs []types.Message) error {
 		batchNum++
 
 		if totalBatches > 1 {
-			fmt.Fprintf(errOut(), "[%d/%d] %d건 발송 중...\n", batchNum, totalBatches, len(batch))
+			_, _ = fmt.Fprintf(errOut(), "[%d/%d] %d건 발송 중...\n", batchNum, totalBatches, len(batch))
 		}
 
 		req := types.SendRequest{
@@ -149,8 +149,8 @@ func printSendResult(data json.RawMessage) error {
 	)
 
 	if len(resp.FailedMessageList) > 0 {
-		fmt.Fprintln(out())
-		fmt.Fprintln(out(), "실패 메시지:")
+		_, _ = fmt.Fprintln(out())
+		_, _ = fmt.Fprintln(out(), "실패 메시지:")
 		headers := []string{"수신번호", "상태코드", "상태메시지"}
 		var rows [][]string
 		for _, f := range resp.FailedMessageList {
@@ -169,7 +169,7 @@ func loadCSVMessages(filepath, from, textTemplate string) ([]types.Message, erro
 	if err != nil {
 		return nil, fmt.Errorf("CSV 파일 열기 실패: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	reader := csv.NewReader(f)
 	records, err := reader.ReadAll()
@@ -261,7 +261,7 @@ func resolveFrom(c *client.Client) (string, error) {
 		return "", fmt.Errorf("등록된 활성 발신번호가 없습니다. solactl senderid list로 확인하세요")
 	case 1:
 		selected := senders[0].PhoneNumber
-		fmt.Fprintf(errOut(), "발신번호 자동 선택: %s\n", selected)
+		_, _ = fmt.Fprintf(errOut(), "발신번호 자동 선택: %s\n", selected)
 		return selected, nil
 	default:
 		var lines []string

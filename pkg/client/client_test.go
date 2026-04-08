@@ -637,8 +637,8 @@ func TestParseErrorResponse_EmptyBody(t *testing.T) {
 		t.Fatalf("expected APIError, got %T: %v", err, err)
 	}
 	// Empty body should fallback to http.StatusText
-	if apiErr.ErrorMessage != http.StatusText(502) {
-		t.Errorf("expected %q, got %q", http.StatusText(502), apiErr.ErrorMessage)
+	if apiErr.ErrorMessage != http.StatusText(http.StatusBadGateway) {
+		t.Errorf("expected %q, got %q", http.StatusText(http.StatusBadGateway), apiErr.ErrorMessage)
 	}
 	if apiErr.ErrorCode != "" {
 		t.Errorf("expected empty errorCode, got %q", apiErr.ErrorCode)

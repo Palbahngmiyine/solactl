@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+  statuses: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  release-please:
+    name: Release Please
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      pr_head_sha: ${{ steps.pr-sha.outputs.sha }}
+    steps:
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get PR head SHA
+        id: pr-sha
+        if: ${{ !steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          SHA=$(gh pr list --repo "$GH_REPO" --head release-please--branches--main --state open --json headRefOid --jq '.[0].headRefOid')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+  test-release-pr:
+    name: Test (Release PR)
+    needs: release-please
+    if: ${{ !needs.release-please.outputs.release_created && needs.release-please.outputs.pr_head_sha != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set pending status
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ needs.release-please.outputs.pr_head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=pending -f context="Test" -f description="Running tests..."
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.pr_head_sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.1'
+
+      - name: Run tests
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Build
+        run: go build -o /dev/null ./cmd/solactl
+
+      - name: Report success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ needs.release-please.outputs.pr_head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=success -f context="Test" -f description="Tests passed"
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ needs.release-please.outputs.pr_head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=failure -f context="Test" -f description="Tests failed"
+
+  lint-release-pr:
+    name: Lint (Release PR)
+    needs: release-please
+    if: ${{ !needs.release-please.outputs.release_created && needs.release-please.outputs.pr_head_sha != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set pending status
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ needs.release-please.outputs.pr_head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=pending -f context="Lint" -f description="Running lint..."
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.pr_head_sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.1'
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11
+
+      - name: Report success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ needs.release-please.outputs.pr_head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=success -f context="Lint" -f description="Lint passed"
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ needs.release-please.outputs.pr_head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=failure -f context="Lint" -f description="Lint failed"
+
+  goreleaser:
+    name: Release Binaries
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.1'
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

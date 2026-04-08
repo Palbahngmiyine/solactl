@@ -27,13 +27,7 @@ func detectKakaoType(msg *types.Message) string {
 	ko := msg.KakaoOptions
 
 	// Check for BMS: templateId starts with KA01BP or bms field present
-	isBMS := false
-	if ko.TemplateID != "" && strings.HasPrefix(ko.TemplateID, "KA01BP") {
-		isBMS = true
-	}
-	if ko.BMS != nil {
-		isBMS = true
-	}
+	isBMS := (ko.TemplateID != "" && strings.HasPrefix(ko.TemplateID, "KA01BP")) || ko.BMS != nil
 
 	if isBMS {
 		if ko.TemplateID != "" {
