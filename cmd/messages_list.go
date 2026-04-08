@@ -105,7 +105,7 @@ func runMessagesList(cmd *cobra.Command, args []string) error {
 	p.FormatTable(headers, rows)
 
 	if resp.NextKey != "" {
-		fmt.Fprintf(out(), "\n다음 페이지: solactl messages list --start-key %q\n", resp.NextKey)
+		_, _ = fmt.Fprintf(out(), "\n다음 페이지: solactl messages list --start-key %q\n", resp.NextKey)
 	}
 
 	return nil

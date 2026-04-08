@@ -50,7 +50,7 @@ type githubAsset struct {
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
 	w := out()
-	fmt.Fprintln(w, "최신 버전 확인 중...")
+	_, _ = fmt.Fprintln(w, "최신 버전 확인 중...")
 
 	httpC := upgradeHTTPClient
 	if httpC == nil {
@@ -67,7 +67,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("GitHub API 요청 실패: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -88,17 +88,17 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	current, err := version.ParseSemver(version.Version)
 	if err != nil {
 		if version.Version != "dev" && version.Version != "" {
-			fmt.Fprintf(w, "경고: 현재 버전(%s) 파싱 실패, 업그레이드를 계속합니다\n", version.Version)
+			_, _ = fmt.Fprintf(w, "경고: 현재 버전(%s) 파싱 실패, 업그레이드를 계속합니다\n", version.Version)
 		}
 		current = version.Semver{}
 	}
 
 	if version.CompareSemver(current, latest) >= 0 {
-		fmt.Fprintf(w, "이미 최신 버전입니다 (%s)\n", version.Version)
+		_, _ = fmt.Fprintf(w, "이미 최신 버전입니다 (%s)\n", version.Version)
 		return nil
 	}
 
-	fmt.Fprintf(w, "%s → %s 업그레이드를 시작합니다\n", version.Version, release.TagName)
+	_, _ = fmt.Fprintf(w, "%s → %s 업그레이드를 시작합니다\n", version.Version, release.TagName)
 
 	// 3. Find matching asset
 	ver := strings.TrimPrefix(release.TagName, "v")
@@ -121,14 +121,14 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("현재 플랫폼(%s/%s)에 맞는 릴리스를 찾을 수 없습니다: %s", osName, archName, assetName)
 	}
 
-	fmt.Fprintf(w, "다운로드 중... %s\n", assetName)
+	_, _ = fmt.Fprintf(w, "다운로드 중... %s\n", assetName)
 
 	// 4. Download to temp directory
 	tmpDir, err := os.MkdirTemp("", "solactl-upgrade-*")
 	if err != nil {
 		return fmt.Errorf("임시 디렉토리 생성 실패: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	archivePath := filepath.Join(tmpDir, assetName)
 	if err := downloadFile(ctx(), httpC, assetURL, archivePath); err != nil {
@@ -136,7 +136,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	// 5. Extract binary
-	fmt.Fprintln(w, "아카이브 추출 중...")
+	_, _ = fmt.Fprintln(w, "아카이브 추출 중...")
 	binaryName := "solactl"
 	if osName == "windows" {
 		binaryName = "solactl.exe"
@@ -148,7 +148,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	// 6. Replace binary
-	fmt.Fprintln(w, "바이너리 교체 중...")
+	_, _ = fmt.Fprintln(w, "바이너리 교체 중...")
 	execPath, err := executablePathFunc()
 	if err != nil {
 		return fmt.Errorf("현재 바이너리 경로 확인 실패: %w", err)
@@ -191,7 +191,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	// On Windows the .old file may still be locked; removal failure is not fatal
 	_ = os.Remove(backupPath)
 
-	fmt.Fprintf(w, "업그레이드 완료! solactl %s\n", release.TagName)
+	_, _ = fmt.Fprintf(w, "업그레이드 완료! solactl %s\n", release.TagName)
 	return nil
 }
 
@@ -204,7 +204,7 @@ func downloadFile(reqCtx context.Context, client *http.Client, url, destPath str
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
@@ -242,13 +242,13 @@ func extractFromTarGz(archivePath, destDir, binaryName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return "", fmt.Errorf("gzip 디코딩 실패: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -277,7 +277,7 @@ func extractFromTarGz(archivePath, destDir, binaryName string) (string, error) {
 		}
 
 		n, err := io.Copy(outFile, io.LimitReader(tr, maxExtractSize+1))
-		outFile.Close()
+		_ = outFile.Close()
 		if err != nil {
 			return "", err
 		}
@@ -296,7 +296,7 @@ func extractFromZip(archivePath, destDir, binaryName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("zip 열기 실패: %w", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	for _, f := range r.File {
 		// Security: reject path traversal
@@ -317,13 +317,13 @@ func extractFromZip(archivePath, destDir, binaryName string) (string, error) {
 		destPath := filepath.Join(destDir, binaryName)
 		outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY, 0755)
 		if err != nil {
-			rc.Close()
+			_ = rc.Close()
 			return "", err
 		}
 
 		n, err := io.Copy(outFile, io.LimitReader(rc, maxExtractSize+1))
-		outFile.Close()
-		rc.Close()
+		_ = outFile.Close()
+		_ = rc.Close()
 		if err != nil {
 			return "", err
 		}
@@ -342,7 +342,7 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	outFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
