@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 var (
 	flagAPIKey    string
 	flagAPISecret string
+	flagProfile   string
 	flagJSON      bool
 	flagDebug     bool
 	flagTimeout   time.Duration
@@ -63,6 +65,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", "", "API Key")
 	rootCmd.PersistentFlags().StringVar(&flagAPISecret, "api-secret", "", "API Secret")
+	rootCmd.PersistentFlags().StringVar(&flagProfile, "profile", "", "사용할 프로필 이름")
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "JSON 출력 모드")
 	rootCmd.PersistentFlags().BoolVar(&flagDebug, "debug", false, "디버그 로그 출력")
 	rootCmd.PersistentFlags().DurationVar(&flagTimeout, "timeout", 30*time.Second, "요청 타임아웃 (예: 30s, 1m)")
@@ -88,7 +91,19 @@ func loadConfig() (*config.Config, error) {
 		overrides.APISecret = flagAPISecret
 	}
 
-	cfg, err := config.Load(overrides)
+	// Warn if explicit --profile was requested but not found
+	if flagProfile != "" {
+		if cf, loadErr := config.LoadCredentialsFile(); loadErr == nil {
+			if _, ok := cf.Profiles[flagProfile]; !ok {
+				_, _ = fmt.Fprintf(errOut(), "경고: 프로필 '%s'을(를) 찾을 수 없습니다. 환경 변수/플래그 값을 사용합니다.\n", flagProfile)
+			}
+		}
+	}
+
+	cfg, err := config.Load(&config.LoadOptions{
+		Overrides:   overrides,
+		ProfileName: flagProfile,
+	})
 	if err != nil {
 		return nil, err
 	}

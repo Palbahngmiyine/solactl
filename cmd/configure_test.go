@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,7 @@ func setupTestHome(t *testing.T) string {
 func resetFlags() {
 	flagAPIKey = ""
 	flagAPISecret = ""
+	flagProfile = ""
 	flagJSON = false
 	flagDebug = false
 }
@@ -161,7 +163,7 @@ func TestConfigureShow_NoAPIURL(t *testing.T) {
 	resetFlags()
 
 	// Save config
-	if err := config.Save(&config.Config{APIKey: "K", APISecret: "S"}); err != nil {
+	if err := config.Save(&config.Config{APIKey: "K", APISecret: "S"}, ""); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -186,12 +188,12 @@ func TestConfigureShow_NoAPIURL(t *testing.T) {
 func TestSaveConfigure_EmptyValues(t *testing.T) {
 	setupTestHome(t)
 
-	err := saveConfigure(&config.Config{APIKey: "", APISecret: "secret"})
+	err := saveConfigure(&config.Config{APIKey: "", APISecret: "secret"}, "")
 	if err == nil {
 		t.Error("expected error for empty API Key")
 	}
 
-	err = saveConfigure(&config.Config{APIKey: "key", APISecret: ""})
+	err = saveConfigure(&config.Config{APIKey: "key", APISecret: ""}, "")
 	if err == nil {
 		t.Error("expected error for empty API Secret")
 	}
@@ -274,12 +276,276 @@ func TestSaveConfigure_SaveFailure(t *testing.T) {
 	outWriter = &buf
 	t.Cleanup(func() { outWriter = nil })
 
-	err := saveConfigure(&config.Config{APIKey: "testkey", APISecret: "testsecret"})
+	err := saveConfigure(&config.Config{APIKey: "testkey", APISecret: "testsecret"}, "")
 	if err == nil {
 		t.Fatal("expected save failure error")
 	}
 	if !strings.Contains(err.Error(), "설정 저장 실패") {
 		t.Errorf("expected '설정 저장 실패' in error, got: %v", err)
+	}
+	resetFlags()
+}
+
+func setupMultiProfile(t *testing.T, tmpDir string, profiles map[string]struct{ Key, Secret string }, active string) {
+	t.Helper()
+	cfgDir := filepath.Join(tmpDir, ".solactl")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	type profileCfg struct {
+		APIKey    string `json:"api_key"`
+		APISecret string `json:"api_secret"`
+	}
+	type credFile struct {
+		Profiles      map[string]*profileCfg `json:"profiles"`
+		ActiveProfile string                 `json:"active_profile"`
+	}
+	cf := &credFile{Profiles: make(map[string]*profileCfg), ActiveProfile: active}
+	for name, p := range profiles {
+		cf.Profiles[name] = &profileCfg{APIKey: p.Key, APISecret: p.Secret}
+	}
+	data, _ := json.MarshalIndent(cf, "", "  ")
+	if err := os.WriteFile(filepath.Join(cfgDir, "credentials.json"), data, 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
+func TestConfigure_WithProfile(t *testing.T) {
+	tmpDir := setupTestHome(t)
+	resetFlags()
+
+	var buf bytes.Buffer
+	outWriter = &buf
+	t.Cleanup(func() { outWriter = nil })
+
+	rootCmd.SetArgs([]string{"configure", "--profile", "staging", "--api-key", "STAGINGKEY", "--api-secret", "STAGINGSECRET"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "설정이 저장되었습니다") {
+		t.Errorf("expected save confirmation, got: %s", output)
+	}
+	if !strings.Contains(output, "staging") {
+		t.Errorf("expected profile name in output, got: %s", output)
+	}
+
+	// Verify the profile was saved
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".solactl", "credentials.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(data), "STAGINGKEY") {
+		t.Errorf("config file should contain staging key: %s", data)
+	}
+	if !strings.Contains(string(data), `"staging"`) {
+		t.Errorf("config file should contain staging profile: %s", data)
+	}
+	resetFlags()
+}
+
+func TestConfigureList_Empty(t *testing.T) {
+	setupTestHome(t)
+	resetFlags()
+
+	var buf bytes.Buffer
+	outWriter = &buf
+	var errBuf bytes.Buffer
+	errWriter = &errBuf
+	t.Cleanup(func() { outWriter = nil; errWriter = nil })
+
+	rootCmd.SetArgs([]string{"configure", "list"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	errOutput := errBuf.String()
+	if !strings.Contains(errOutput, "프로필이 없습니다") {
+		t.Errorf("expected 'no profiles' message on stderr, got: %s", errOutput)
+	}
+	resetFlags()
+}
+
+func TestConfigureList_MultipleProfiles(t *testing.T) {
+	tmpDir := setupTestHome(t)
+	resetFlags()
+
+	setupMultiProfile(t, tmpDir, map[string]struct{ Key, Secret string }{
+		"default": {"DEFAULT-KEY", "DEFAULT-SECRET-1234567890"},
+		"staging": {"STAGING-KEY", "STAGING-SECRET-1234567890"},
+	}, "default")
+
+	var buf bytes.Buffer
+	outWriter = &buf
+	t.Cleanup(func() { outWriter = nil })
+
+	rootCmd.SetArgs([]string{"configure", "list"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "default") {
+		t.Errorf("expected 'default' profile in output, got: %s", output)
+	}
+	if !strings.Contains(output, "staging") {
+		t.Errorf("expected 'staging' profile in output, got: %s", output)
+	}
+	if !strings.Contains(output, "*") {
+		t.Errorf("expected active marker (*) in output, got: %s", output)
+	}
+	// API Secret should be masked
+	if strings.Contains(output, "DEFAULT-SECRET-1234567890") {
+		t.Error("API Secret should be masked in list output")
+	}
+	resetFlags()
+}
+
+func TestConfigureUse_Valid(t *testing.T) {
+	tmpDir := setupTestHome(t)
+	resetFlags()
+
+	setupMultiProfile(t, tmpDir, map[string]struct{ Key, Secret string }{
+		"default": {"D-KEY", "D-SECRET"},
+		"staging": {"S-KEY", "S-SECRET"},
+	}, "default")
+
+	var errBuf bytes.Buffer
+	errWriter = &errBuf
+	t.Cleanup(func() { errWriter = nil })
+
+	rootCmd.SetArgs([]string{"configure", "use", "staging"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	errOutput := errBuf.String()
+	if !strings.Contains(errOutput, "staging") {
+		t.Errorf("expected profile name in confirmation, got: %s", errOutput)
+	}
+	if !strings.Contains(errOutput, "전환") {
+		t.Errorf("expected switch confirmation, got: %s", errOutput)
+	}
+	resetFlags()
+}
+
+func TestConfigureUse_NonExistent(t *testing.T) {
+	tmpDir := setupTestHome(t)
+	resetFlags()
+
+	setupMultiProfile(t, tmpDir, map[string]struct{ Key, Secret string }{
+		"default": {"D-KEY", "D-SECRET"},
+	}, "default")
+
+	rootCmd.SetArgs([]string{"configure", "use", "nonexistent"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for non-existent profile")
+	}
+	resetFlags()
+}
+
+func TestConfigureUse_NoArg(t *testing.T) {
+	setupTestHome(t)
+	resetFlags()
+
+	rootCmd.SetArgs([]string{"configure", "use"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no profile argument given")
+	}
+	resetFlags()
+}
+
+func TestConfigureDelete_Valid(t *testing.T) {
+	tmpDir := setupTestHome(t)
+	resetFlags()
+
+	setupMultiProfile(t, tmpDir, map[string]struct{ Key, Secret string }{
+		"default": {"D-KEY", "D-SECRET"},
+		"staging": {"S-KEY", "S-SECRET"},
+	}, "default")
+
+	var errBuf bytes.Buffer
+	errWriter = &errBuf
+	t.Cleanup(func() { errWriter = nil })
+
+	rootCmd.SetArgs([]string{"configure", "delete", "staging"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	errOutput := errBuf.String()
+	if !strings.Contains(errOutput, "삭제") {
+		t.Errorf("expected delete confirmation, got: %s", errOutput)
+	}
+
+	// Verify profile was deleted
+	data, _ := os.ReadFile(filepath.Join(tmpDir, ".solactl", "credentials.json"))
+	if strings.Contains(string(data), "staging") {
+		t.Error("staging profile should be deleted from file")
+	}
+	resetFlags()
+}
+
+func TestConfigureDelete_ActiveProfile(t *testing.T) {
+	tmpDir := setupTestHome(t)
+	resetFlags()
+
+	setupMultiProfile(t, tmpDir, map[string]struct{ Key, Secret string }{
+		"default": {"D-KEY", "D-SECRET"},
+		"staging": {"S-KEY", "S-SECRET"},
+	}, "default")
+
+	rootCmd.SetArgs([]string{"configure", "delete", "default"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when deleting active profile")
+	}
+	resetFlags()
+}
+
+func TestConfigureDelete_NoArg(t *testing.T) {
+	setupTestHome(t)
+	resetFlags()
+
+	rootCmd.SetArgs([]string{"configure", "delete"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no profile argument given")
+	}
+	resetFlags()
+}
+
+func TestConfigureShow_DisplaysProfileName(t *testing.T) {
+	tmpDir := setupTestHome(t)
+	resetFlags()
+
+	setupMultiProfile(t, tmpDir, map[string]struct{ Key, Secret string }{
+		"default": {"MYKEY", "MYSECRETVALUE123456789012345"},
+	}, "default")
+
+	var buf bytes.Buffer
+	outWriter = &buf
+	t.Cleanup(func() { outWriter = nil })
+
+	rootCmd.SetArgs([]string{"configure", "show"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Profile") {
+		t.Errorf("expected Profile label in output, got: %s", output)
+	}
+	if !strings.Contains(output, "default") {
+		t.Errorf("expected profile name 'default' in output, got: %s", output)
 	}
 	resetFlags()
 }
