@@ -627,8 +627,8 @@ func TestLoad_WithProfile(t *testing.T) {
 		{
 			name: "load named profile",
 			profiles: map[string]*Config{
-				"default":  {APIKey: "default-key", APISecret: "default-secret"},
-				"staging":  {APIKey: "staging-key", APISecret: "staging-secret"},
+				"default": {APIKey: "default-key", APISecret: "default-secret"},
+				"staging": {APIKey: "staging-key", APISecret: "staging-secret"},
 			},
 			active:      "default",
 			loadProfile: "staging",
@@ -637,8 +637,8 @@ func TestLoad_WithProfile(t *testing.T) {
 		{
 			name: "load active profile when no profile specified",
 			profiles: map[string]*Config{
-				"default":  {APIKey: "default-key", APISecret: "default-secret"},
-				"staging":  {APIKey: "staging-key", APISecret: "staging-secret"},
+				"default": {APIKey: "default-key", APISecret: "default-secret"},
+				"staging": {APIKey: "staging-key", APISecret: "staging-secret"},
 			},
 			active:      "staging",
 			loadProfile: "",

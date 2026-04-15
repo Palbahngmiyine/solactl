@@ -241,18 +241,20 @@ func detectAndLoad(data []byte) (*CredentialsFile, error) {
 // picks the first profile name alphabetically for determinism.
 func inferActiveProfile(cf *CredentialsFile) {
 	if cf.ActiveProfile != "" {
-		if _, ok := cf.Profiles[cf.ActiveProfile]; ok {
+		if p, ok := cf.Profiles[cf.ActiveProfile]; ok && p != nil {
 			return
 		}
 	}
-	// ActiveProfile is empty or points to a missing profile
-	if _, ok := cf.Profiles[DefaultProfile]; ok {
+	// ActiveProfile is empty, missing, or points to a nil profile
+	if p, ok := cf.Profiles[DefaultProfile]; ok && p != nil {
 		cf.ActiveProfile = DefaultProfile
 		return
 	}
 	names := make([]string, 0, len(cf.Profiles))
-	for name := range cf.Profiles {
-		names = append(names, name)
+	for name, p := range cf.Profiles {
+		if p != nil {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	if len(names) > 0 {
@@ -297,7 +299,11 @@ func saveCredentialsFile(cf *CredentialsFile) error {
 		_ = os.Remove(tmpPath)
 		return closeErr
 	}
-	return os.Rename(tmpPath, path)
+	if renameErr := os.Rename(tmpPath, path); renameErr != nil {
+		_ = os.Remove(tmpPath)
+		return renameErr
+	}
+	return nil
 }
 
 // ActiveProfileName returns the name of the currently active profile.
