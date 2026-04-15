@@ -85,7 +85,7 @@ func runKakaoTemplateCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"name":         kakaoTplCreateFlagName,
 		"content":      kakaoTplCreateFlagContent,
 		"categoryCode": kakaoTplCreateFlagCategoryCode,
@@ -157,7 +157,7 @@ func runKakaoTemplateCreate(cmd *cobra.Command, args []string) error {
 
 // setJSONField parses a JSON string and sets it in the body map.
 // Returns nil for empty input, error for invalid JSON.
-func setJSONField(body map[string]interface{}, key, value string) error {
+func setJSONField(body map[string]any, key, value string) error {
 	if value == "" {
 		return nil
 	}

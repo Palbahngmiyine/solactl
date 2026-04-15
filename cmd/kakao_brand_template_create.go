@@ -75,7 +75,7 @@ func runKakaoBrandTemplateCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"chatBubbleType": kakaoBtplCreateFlagChatBubbleType,
 	}
 

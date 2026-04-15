@@ -358,7 +358,7 @@ func TestKakaoChannelGet_JSONMode(t *testing.T) {
 	}
 
 	output := buf.String()
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &parsed); err != nil {
 		t.Errorf("output is not valid JSON: %v", err)
 	}
@@ -654,7 +654,7 @@ func TestKakaoChannelGroupGet_JSONMode(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &parsed); err != nil {
 		t.Errorf("output is not valid JSON: %v", err)
 	}

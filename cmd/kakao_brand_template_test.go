@@ -61,6 +61,8 @@ func resetKakaoBrandTemplateFlags() {
 func setupKakaoBrandTemplateTest(t *testing.T, handler http.HandlerFunc) {
 	t.Helper()
 	resetKakaoBrandTemplateFlags()
+	resetPflagChanged(kakaoBrandTemplateUpdateCmd)
+	resetPflagChanged(kakaoBrandTemplateCreateCmd)
 	setupKakaoTest(t, handler)
 }
 
@@ -156,7 +158,7 @@ func TestKakaoBrandTemplateCreate_Success(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		body, _ := io.ReadAll(r.Body)
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		_ = json.Unmarshal(body, &parsed)
 		if parsed["pfId"] != "FAKE_CH_001" {
 			t.Errorf("expected pfId=FAKE_CH_001, got %v", parsed["pfId"])

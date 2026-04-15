@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
 	"github.com/solapi/solactl/pkg/types"
 )
 
@@ -67,7 +70,17 @@ func resetKakaoTemplateFlags() {
 func setupKakaoTemplateTest(t *testing.T, handler http.HandlerFunc) {
 	t.Helper()
 	resetKakaoTemplateFlags()
+	resetPflagChanged(kakaoTemplateUpdateCmd)
+	resetPflagChanged(kakaoTemplateCreateCmd)
 	setupKakaoTest(t, handler)
+}
+
+// resetPflagChanged clears the Changed bit on all flags of a command.
+// This prevents flag state leakage between tests.
+func resetPflagChanged(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		f.Changed = false
+	})
 }
 
 // --- Template List Tests ---
@@ -217,7 +230,7 @@ func TestKakaoTemplateCreate_Success(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		body, _ := io.ReadAll(r.Body)
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		_ = json.Unmarshal(body, &parsed)
 		if parsed["channelId"] != "FAKE_CH_001" {
 			t.Errorf("expected channelId=FAKE_CH_001")
@@ -351,7 +364,7 @@ func TestKakaoTemplateCreate_InvalidButtonsJSON(t *testing.T) {
 func TestKakaoTemplateCreate_WithAllFlags(t *testing.T) {
 	setupKakaoTemplateTest(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		_ = json.Unmarshal(body, &parsed)
 		if parsed["messageType"] != "AD" {
 			t.Errorf("expected messageType=AD, got %v", parsed["messageType"])
@@ -392,7 +405,7 @@ func TestKakaoTemplateUpdate_PartialUpdate(t *testing.T) {
 			t.Errorf("expected PUT, got %s", r.Method)
 		}
 		body, _ := io.ReadAll(r.Body)
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		_ = json.Unmarshal(body, &parsed)
 		if parsed["name"] != "새이름" {
 			t.Errorf("expected name=새이름, got %v", parsed["name"])
@@ -534,7 +547,7 @@ func TestKakaoTemplateInspect_Success(t *testing.T) {
 func TestKakaoTemplateInspect_WithComment(t *testing.T) {
 	setupKakaoTemplateTest(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		_ = json.Unmarshal(body, &parsed)
 		if parsed["comment"] != "검수 부탁드립니다" {
 			t.Errorf("expected comment, got %v", parsed["comment"])
