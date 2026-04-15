@@ -334,7 +334,7 @@ func SetActiveProfile(name string) error {
 		return fmt.Errorf("설정 파일 읽기 실패: %w", err)
 	}
 
-	if _, ok := cf.Profiles[name]; !ok {
+	if p, ok := cf.Profiles[name]; !ok || p == nil {
 		return fmt.Errorf("프로필 '%s'을(를) 찾을 수 없습니다", name)
 	}
 
@@ -353,7 +353,7 @@ func DeleteProfile(name string) error {
 		return fmt.Errorf("설정 파일 읽기 실패: %w", err)
 	}
 
-	if _, ok := cf.Profiles[name]; !ok {
+	if p, ok := cf.Profiles[name]; !ok || p == nil {
 		return fmt.Errorf("프로필 '%s'을(를) 찾을 수 없습니다", name)
 	}
 
