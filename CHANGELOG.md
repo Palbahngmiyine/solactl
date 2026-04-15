@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.2](https://github.com/solapi/solactl/compare/v0.1.1...v0.1.2) (2026-04-15)
+
+
+### Features
+
+* add kakao channel, template, and brand template management ([d1164e0](https://github.com/solapi/solactl/commit/d1164e000595d3a0739080a59c89de15e43c598f))
+* add kakao channel, template, and brand template management commands ([9b880d5](https://github.com/solapi/solactl/commit/9b880d5065d7e58f40c101bec7b0a0302fe8bad6))
+
+
+### Bug Fixes
+
+* address review issues from pr-review-toolkit and codex ([c2ec95f](https://github.com/solapi/solactl/commit/c2ec95f9b0b3583d6d7aea6e91dbba94b0ac66e5))
+* unify interface{} to any, reset pflag Changed state in tests ([ee0e9ab](https://github.com/solapi/solactl/commit/ee0e9ab400487f908cc734dc674b532b400723ea))
+
 ## [0.1.1](https://github.com/solapi/solactl/compare/v0.1.0...v0.1.1) (2026-04-08)
 
 
