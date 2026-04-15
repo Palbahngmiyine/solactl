@@ -21,6 +21,7 @@ import (
 var (
 	flagAPIKey    string
 	flagAPISecret string
+	flagProfile   string
 	flagJSON      bool
 	flagDebug     bool
 	flagTimeout   time.Duration
@@ -63,6 +64,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", "", "API Key")
 	rootCmd.PersistentFlags().StringVar(&flagAPISecret, "api-secret", "", "API Secret")
+	rootCmd.PersistentFlags().StringVar(&flagProfile, "profile", "", "사용할 프로필 이름")
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "JSON 출력 모드")
 	rootCmd.PersistentFlags().BoolVar(&flagDebug, "debug", false, "디버그 로그 출력")
 	rootCmd.PersistentFlags().DurationVar(&flagTimeout, "timeout", 30*time.Second, "요청 타임아웃 (예: 30s, 1m)")
@@ -88,7 +90,10 @@ func loadConfig() (*config.Config, error) {
 		overrides.APISecret = flagAPISecret
 	}
 
-	cfg, err := config.Load(overrides)
+	cfg, err := config.Load(&config.LoadOptions{
+		Overrides:   overrides,
+		ProfileName: flagProfile,
+	})
 	if err != nil {
 		return nil, err
 	}
