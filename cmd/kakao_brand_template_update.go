@@ -66,33 +66,33 @@ func runKakaoBrandTemplateUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"chatBubbleType": kakaoBtplUpdateFlagChatBubbleType,
 	}
 
-	setIfChanged(cmd, body, "name", kakaoBtplUpdateFlagName)
-	setIfChanged(cmd, body, "content", kakaoBtplUpdateFlagContent)
-	setIfChanged(cmd, body, "header", kakaoBtplUpdateFlagHeader)
-	setIfChanged(cmd, body, "imageId", "image-id", kakaoBtplUpdateFlagImageID)
-	setIfChanged(cmd, body, "imageLink", "image-link", kakaoBtplUpdateFlagImageLink)
-	setIfChanged(cmd, body, "additionalContent", "additional-content", kakaoBtplUpdateFlagAdditional)
+	setStringIfChanged(cmd, body, "name", "name", kakaoBtplUpdateFlagName)
+	setStringIfChanged(cmd, body, "content", "content", kakaoBtplUpdateFlagContent)
+	setStringIfChanged(cmd, body, "header", "header", kakaoBtplUpdateFlagHeader)
+	setStringIfChanged(cmd, body, "imageId", "image-id", kakaoBtplUpdateFlagImageID)
+	setStringIfChanged(cmd, body, "imageLink", "image-link", kakaoBtplUpdateFlagImageLink)
+	setStringIfChanged(cmd, body, "additionalContent", "additional-content", kakaoBtplUpdateFlagAdditional)
 
 	if cmd.Flags().Changed("adult") {
 		body["adult"] = kakaoBtplUpdateFlagAdult
 	}
 
-	// JSON fields
-	jsonFields := map[string]string{
-		"carousel":        kakaoBtplUpdateFlagCarousel,
-		"mainWideItem":    kakaoBtplUpdateFlagMainWideItem,
-		"subWideItemList": kakaoBtplUpdateFlagSubWideItemList,
-		"video":           kakaoBtplUpdateFlagVideo,
-		"commerce":        kakaoBtplUpdateFlagCommerce,
-		"buttons":         kakaoBtplUpdateFlagButtons,
-		"coupon":          kakaoBtplUpdateFlagCoupon,
+	// JSON fields — only include if explicitly provided
+	jsonFields := []struct{ jsonKey, flagName, value string }{
+		{"carousel", "carousel", kakaoBtplUpdateFlagCarousel},
+		{"mainWideItem", "main-wide-item", kakaoBtplUpdateFlagMainWideItem},
+		{"subWideItemList", "sub-wide-item-list", kakaoBtplUpdateFlagSubWideItemList},
+		{"video", "video", kakaoBtplUpdateFlagVideo},
+		{"commerce", "commerce", kakaoBtplUpdateFlagCommerce},
+		{"buttons", "buttons", kakaoBtplUpdateFlagButtons},
+		{"coupon", "coupon", kakaoBtplUpdateFlagCoupon},
 	}
-	for key, value := range jsonFields {
-		if err := setJSONField(body, key, value); err != nil {
+	for _, f := range jsonFields {
+		if err := setJSONIfChanged(cmd, body, f.jsonKey, f.flagName, f.value); err != nil {
 			return err
 		}
 	}

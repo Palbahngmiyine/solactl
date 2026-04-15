@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -84,7 +85,7 @@ func TestKakaoChannel_SenderKeysNotExposed(t *testing.T) {
 	// senderKeys should not be accessible since the struct has no such field
 	reMarshaled, _ := json.Marshal(ch)
 	reStr := string(reMarshaled)
-	if contains(reStr, "senderKeys") || contains(reStr, "secret") {
+	if strings.Contains(reStr,"senderKeys") || strings.Contains(reStr, "secret") {
 		t.Error("senderKeys should not be exposed in re-marshaled output")
 	}
 }
@@ -109,7 +110,7 @@ func TestKakaoChannelGroup_GroupKeysNotExposed(t *testing.T) {
 	}
 	reMarshaled, _ := json.Marshal(g)
 	reStr := string(reMarshaled)
-	if contains(reStr, "groupKeys") || contains(reStr, "secret") {
+	if strings.Contains(reStr,"groupKeys") || strings.Contains(reStr, "secret") {
 		t.Error("groupKeys should not be exposed in re-marshaled output")
 	}
 }
@@ -226,17 +227,4 @@ func TestKakaoChannelListResponse_JSONParsing(t *testing.T) {
 	if resp.NextKey != "nk" {
 		t.Errorf("expected nextKey=nk, got %s", resp.NextKey)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

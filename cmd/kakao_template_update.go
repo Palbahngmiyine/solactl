@@ -7,8 +7,6 @@ import (
 )
 
 var (
-	kakaoTplUpdateFlagChannelID      string
-	kakaoTplUpdateFlagChannelGroupID string
 	kakaoTplUpdateFlagName           string
 	kakaoTplUpdateFlagContent        string
 	kakaoTplUpdateFlagCategoryCode   string
@@ -40,8 +38,6 @@ var kakaoTemplateUpdateCmd = &cobra.Command{
 }
 
 func init() {
-	kakaoTemplateUpdateCmd.Flags().StringVar(&kakaoTplUpdateFlagChannelID, "channel-id", "", "채널 ID")
-	kakaoTemplateUpdateCmd.Flags().StringVar(&kakaoTplUpdateFlagChannelGroupID, "channel-group-id", "", "채널 그룹 ID")
 	kakaoTemplateUpdateCmd.Flags().StringVar(&kakaoTplUpdateFlagName, "name", "", "템플릿 이름")
 	kakaoTemplateUpdateCmd.Flags().StringVar(&kakaoTplUpdateFlagContent, "content", "", "템플릿 내용")
 	kakaoTemplateUpdateCmd.Flags().StringVar(&kakaoTplUpdateFlagCategoryCode, "category-code", "", "카테고리 코드")
@@ -69,20 +65,20 @@ func runKakaoTemplateUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	body := map[string]interface{}{}
+	body := map[string]any{}
 
 	// Only include fields that were explicitly set
-	setIfChanged(cmd, body, "name", kakaoTplUpdateFlagName)
-	setIfChanged(cmd, body, "content", kakaoTplUpdateFlagContent)
-	setIfChanged(cmd, body, "categoryCode", "category-code", kakaoTplUpdateFlagCategoryCode)
-	setIfChanged(cmd, body, "messageType", "message-type", kakaoTplUpdateFlagMessageType)
-	setIfChanged(cmd, body, "emphasizeType", "emphasize-type", kakaoTplUpdateFlagEmphasizeType)
-	setIfChanged(cmd, body, "header", kakaoTplUpdateFlagHeader)
-	setIfChanged(cmd, body, "extra", kakaoTplUpdateFlagExtra)
-	setIfChanged(cmd, body, "ad", kakaoTplUpdateFlagAd)
-	setIfChanged(cmd, body, "emphasizeTitle", "emphasize-title", kakaoTplUpdateFlagEmphasizeTitle)
-	setIfChanged(cmd, body, "emphasizeSubtitle", "emphasize-subtitle", kakaoTplUpdateFlagEmphasizeSub)
-	setIfChanged(cmd, body, "imageId", "image-id", kakaoTplUpdateFlagImageID)
+	setStringIfChanged(cmd, body, "name", "name", kakaoTplUpdateFlagName)
+	setStringIfChanged(cmd, body, "content", "content", kakaoTplUpdateFlagContent)
+	setStringIfChanged(cmd, body, "categoryCode", "category-code", kakaoTplUpdateFlagCategoryCode)
+	setStringIfChanged(cmd, body, "messageType", "message-type", kakaoTplUpdateFlagMessageType)
+	setStringIfChanged(cmd, body, "emphasizeType", "emphasize-type", kakaoTplUpdateFlagEmphasizeType)
+	setStringIfChanged(cmd, body, "header", "header", kakaoTplUpdateFlagHeader)
+	setStringIfChanged(cmd, body, "extra", "extra", kakaoTplUpdateFlagExtra)
+	setStringIfChanged(cmd, body, "ad", "ad", kakaoTplUpdateFlagAd)
+	setStringIfChanged(cmd, body, "emphasizeTitle", "emphasize-title", kakaoTplUpdateFlagEmphasizeTitle)
+	setStringIfChanged(cmd, body, "emphasizeSubtitle", "emphasize-subtitle", kakaoTplUpdateFlagEmphasizeSub)
+	setStringIfChanged(cmd, body, "imageId", "image-id", kakaoTplUpdateFlagImageID)
 
 	if cmd.Flags().Changed("security-flag") {
 		body["securityFlag"] = kakaoTplUpdateFlagSecurityFlag
@@ -124,24 +120,18 @@ func runKakaoTemplateUpdate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// setIfChanged adds a string field to body only if the corresponding flag was changed.
-// Accepts: (cmd, body, jsonKey, value) or (cmd, body, jsonKey, flagName, value).
-func setIfChanged(cmd *cobra.Command, body map[string]interface{}, args ...interface{}) {
-	switch len(args) {
-	case 2:
-		// jsonKey == flagName
-		jsonKey := args[0].(string)
-		value := args[1].(string)
-		if cmd.Flags().Changed(jsonKey) {
-			body[jsonKey] = value
-		}
-	case 3:
-		// jsonKey != flagName
-		jsonKey := args[0].(string)
-		flagName := args[1].(string)
-		value := args[2].(string)
-		if cmd.Flags().Changed(flagName) {
-			body[jsonKey] = value
-		}
+// setStringIfChanged adds a string field to body only if the flag was explicitly provided.
+func setStringIfChanged(cmd *cobra.Command, body map[string]any, jsonKey, flagName, value string) {
+	if cmd.Flags().Changed(flagName) {
+		body[jsonKey] = value
 	}
+}
+
+// setJSONIfChanged parses and adds a JSON field to body only if the flag was explicitly provided.
+// Skips silently if the flag was not changed. Returns error only for invalid JSON.
+func setJSONIfChanged(cmd *cobra.Command, body map[string]any, jsonKey, flagName, value string) error {
+	if !cmd.Flags().Changed(flagName) {
+		return nil
+	}
+	return setJSONField(body, jsonKey, value)
 }

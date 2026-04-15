@@ -152,7 +152,7 @@ func runKakaoTemplateCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	_, _ = fmt.Fprintln(out(), "알림톡 템플릿이 생성되었습니다.")
-	return p.PrintJSON(raw)
+	return nil
 }
 
 // setJSONField parses a JSON string and sets it in the body map.

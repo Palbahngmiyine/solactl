@@ -143,5 +143,5 @@ func runKakaoBrandTemplateCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	_, _ = fmt.Fprintln(out(), "브랜드 템플릿이 생성되었습니다.")
-	return p.PrintJSON(raw)
+	return nil
 }
