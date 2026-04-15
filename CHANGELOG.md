@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.3](https://github.com/solapi/solactl/compare/v0.1.2...v0.1.3) (2026-04-15)
+
+
+### Features
+
+* add multi-profile credential support ([e11b0cc](https://github.com/solapi/solactl/commit/e11b0cccc3a854821ff4be8b7d5c6b4c5adcc442))
+* add multi-profile credential support ([87648d3](https://github.com/solapi/solactl/commit/87648d32879017b42eecfdd48a975e77a6866638))
+
+
+### Bug Fixes
+
+* add nil profile guard to SetActiveProfile and DeleteProfile ([c4ab908](https://github.com/solapi/solactl/commit/c4ab9083cdead9e42ae25a35aa7a6e59addeb1ae))
+* address review issues from pr-review-toolkit and codex ([c70a4e6](https://github.com/solapi/solactl/commit/c70a4e6b8f324b78013600b14206f6a8b15d1e08))
+* address round-2 codex review issues ([07b0621](https://github.com/solapi/solactl/commit/07b0621ff70d49935e343b5c735a1d141c7e2cd4))
+* warn on missing profile and document concurrent write limitation ([70a4d7c](https://github.com/solapi/solactl/commit/70a4d7c226b4ca1afb6d081a97030da01db8774f))
+
 ## [0.1.2](https://github.com/solapi/solactl/compare/v0.1.1...v0.1.2) (2026-04-15)
 
 
