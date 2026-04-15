@@ -137,6 +137,11 @@ func loadProfileFromFile(profileName string) (*Config, error) {
 
 // Save writes the config to a specific profile in ~/.solactl/credentials.json.
 // If profileName is empty, it uses "default".
+//
+// Note: Save performs an unlocked read-modify-write. Concurrent CLI invocations
+// may overwrite each other's profile changes. The atomic rename prevents file
+// corruption but not lost updates. This is an acceptable trade-off for CLI tools
+// where concurrent writes are rare.
 func Save(cfg *Config, profileName string) error {
 	if profileName == "" {
 		profileName = DefaultProfile

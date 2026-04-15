@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -88,6 +89,15 @@ func loadConfig() (*config.Config, error) {
 	}
 	if flagAPISecret != "" {
 		overrides.APISecret = flagAPISecret
+	}
+
+	// Warn if explicit --profile was requested but not found
+	if flagProfile != "" {
+		if cf, loadErr := config.LoadCredentialsFile(); loadErr == nil {
+			if _, ok := cf.Profiles[flagProfile]; !ok {
+				_, _ = fmt.Fprintf(errOut(), "경고: 프로필 '%s'을(를) 찾을 수 없습니다. 환경 변수/플래그 값을 사용합니다.\n", flagProfile)
+			}
+		}
 	}
 
 	cfg, err := config.Load(&config.LoadOptions{
