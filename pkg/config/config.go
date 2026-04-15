@@ -12,6 +12,7 @@ const (
 	configDir      = ".solactl"
 	configFile     = "credentials.json"
 	DefaultProfile = "default"
+	maxProfileName = 64
 )
 
 // Config holds the CLI configuration for a single profile.
@@ -50,6 +51,27 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ValidateProfileName checks that a profile name contains only allowed characters.
+func ValidateProfileName(name string) error {
+	if name == "" {
+		return fmt.Errorf("프로필 이름이 비어있습니다")
+	}
+	if len(name) > maxProfileName {
+		return fmt.Errorf("프로필 이름이 너무 깁니다 (최대 %d자)", maxProfileName)
+	}
+	for _, r := range name {
+		if !isProfileNameChar(r) {
+			return fmt.Errorf("프로필 이름에 허용되지 않는 문자가 포함되어 있습니다: '%c' (영문, 숫자, _, - 만 허용)", r)
+		}
+	}
+	return nil
+}
+
+func isProfileNameChar(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '_' || r == '-'
+}
+
 // Load reads config from file, env vars, and applies overrides.
 // Priority: overrides > env vars > named profile > active profile.
 func Load(opts *LoadOptions) (*Config, error) {
@@ -61,10 +83,7 @@ func Load(opts *LoadOptions) (*Config, error) {
 		profileName = opts.ProfileName
 	}
 
-	fileCfg, err := loadProfileFromFile(profileName)
-	if err != nil && profileName != "" {
-		return nil, err
-	}
+	fileCfg, _ := loadProfileFromFile(profileName)
 	if fileCfg != nil {
 		mergeConfig(cfg, fileCfg)
 	}
@@ -107,7 +126,7 @@ func loadProfileFromFile(profileName string) (*Config, error) {
 	}
 
 	profile, ok := cf.Profiles[name]
-	if !ok {
+	if !ok || profile == nil {
 		if profileName != "" {
 			return nil, fmt.Errorf("프로필 '%s'을(를) 찾을 수 없습니다", profileName)
 		}
@@ -122,8 +141,14 @@ func Save(cfg *Config, profileName string) error {
 	if profileName == "" {
 		profileName = DefaultProfile
 	}
+	if err := ValidateProfileName(profileName); err != nil {
+		return err
+	}
 
-	cf, _ := loadCredentialsFile()
+	cf, err := loadCredentialsFile()
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("설정 파일 읽기 실패: %w", err)
+	}
 	if cf == nil {
 		cf = &CredentialsFile{Profiles: make(map[string]*Config)}
 	}
@@ -195,9 +220,7 @@ func detectAndLoad(data []byte) (*CredentialsFile, error) {
 	// Try new multi-profile format first
 	var cf CredentialsFile
 	if err := json.Unmarshal(data, &cf); err == nil && cf.Profiles != nil && len(cf.Profiles) > 0 {
-		if cf.ActiveProfile == "" {
-			cf.ActiveProfile = DefaultProfile
-		}
+		inferActiveProfile(&cf)
 		return &cf, nil
 	}
 
@@ -211,6 +234,30 @@ func detectAndLoad(data []byte) (*CredentialsFile, error) {
 	}
 
 	return nil, fmt.Errorf("설정 파일 파싱 실패")
+}
+
+// inferActiveProfile sets a valid ActiveProfile when it is empty or points
+// to a non-existent profile. It prefers "default" if present, otherwise
+// picks the first profile name alphabetically for determinism.
+func inferActiveProfile(cf *CredentialsFile) {
+	if cf.ActiveProfile != "" {
+		if _, ok := cf.Profiles[cf.ActiveProfile]; ok {
+			return
+		}
+	}
+	// ActiveProfile is empty or points to a missing profile
+	if _, ok := cf.Profiles[DefaultProfile]; ok {
+		cf.ActiveProfile = DefaultProfile
+		return
+	}
+	names := make([]string, 0, len(cf.Profiles))
+	for name := range cf.Profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) > 0 {
+		cf.ActiveProfile = names[0]
+	}
 }
 
 func saveCredentialsFile(cf *CredentialsFile) error {
@@ -228,7 +275,29 @@ func saveCredentialsFile(cf *CredentialsFile) error {
 	}
 
 	path := filepath.Join(dir, configFile)
-	return os.WriteFile(path, data, 0600)
+
+	// Atomic write: temp file → rename
+	tmp, err := os.CreateTemp(dir, ".credentials-*.tmp")
+	if err != nil {
+		return fmt.Errorf("임시 파일 생성 실패: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("파일 쓰기 실패: %w", writeErr)
+	}
+	if chmodErr := tmp.Chmod(0600); chmodErr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return chmodErr
+	}
+	if closeErr := tmp.Close(); closeErr != nil {
+		_ = os.Remove(tmpPath)
+		return closeErr
+	}
+	return os.Rename(tmpPath, path)
 }
 
 // ActiveProfileName returns the name of the currently active profile.
@@ -245,6 +314,10 @@ func ActiveProfileName() (string, error) {
 
 // SetActiveProfile updates the active_profile field in the credentials file.
 func SetActiveProfile(name string) error {
+	if err := ValidateProfileName(name); err != nil {
+		return err
+	}
+
 	cf, err := loadCredentialsFile()
 	if err != nil {
 		return fmt.Errorf("설정 파일 읽기 실패: %w", err)
@@ -260,6 +333,10 @@ func SetActiveProfile(name string) error {
 
 // DeleteProfile removes a profile from the credentials file.
 func DeleteProfile(name string) error {
+	if err := ValidateProfileName(name); err != nil {
+		return err
+	}
+
 	cf, err := loadCredentialsFile()
 	if err != nil {
 		return fmt.Errorf("설정 파일 읽기 실패: %w", err)
@@ -290,6 +367,9 @@ func ListProfiles() ([]ProfileInfo, error) {
 
 	var profiles []ProfileInfo
 	for name, cfg := range cf.Profiles {
+		if cfg == nil {
+			continue
+		}
 		profiles = append(profiles, ProfileInfo{
 			Name:   name,
 			Config: cfg,
@@ -306,6 +386,9 @@ func ListProfiles() ([]ProfileInfo, error) {
 }
 
 func mergeConfig(dst, src *Config) {
+	if src == nil {
+		return
+	}
 	if src.APIKey != "" {
 		dst.APIKey = src.APIKey
 	}

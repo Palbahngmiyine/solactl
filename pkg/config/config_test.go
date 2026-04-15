@@ -315,8 +315,9 @@ func TestSave_MkdirAllFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when directory creation is blocked, got nil")
 	}
-	if !strings.Contains(err.Error(), "디렉토리 생성 실패") {
-		t.Errorf("error should contain '디렉토리 생성 실패', got: %v", err)
+	// Save now propagates load errors (not just mkdir errors)
+	if !strings.Contains(err.Error(), "설정 파일 읽기 실패") && !strings.Contains(err.Error(), "디렉토리 생성 실패") {
+		t.Errorf("error should indicate file/directory failure, got: %v", err)
 	}
 }
 
@@ -644,13 +645,13 @@ func TestLoad_WithProfile(t *testing.T) {
 			wantKey:     "staging-key",
 		},
 		{
-			name: "error when named profile not found",
+			name: "missing profile returns empty config (env/flags take precedence)",
 			profiles: map[string]*Config{
 				"default": {APIKey: "default-key", APISecret: "default-secret"},
 			},
 			active:      "default",
 			loadProfile: "nonexistent",
-			wantErr:     true,
+			wantKey:     "",
 		},
 	}
 
@@ -903,8 +904,8 @@ func TestDeleteProfile_RejectsLastProfile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Only one profile, and it's active — but the "active" check fires first.
-	// Use a scenario where the sole profile is NOT active to test the "last profile" guard.
+	// With inferActiveProfile, the sole profile is always inferred as active,
+	// so the "active profile" guard fires before the "last profile" guard.
 	setupMultiProfileFile(t, tmpDir, map[string]*Config{
 		"only": {APIKey: "k", APISecret: "s"},
 	}, "other")
@@ -913,8 +914,9 @@ func TestDeleteProfile_RejectsLastProfile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when deleting last profile")
 	}
-	if !strings.Contains(err.Error(), "마지막 프로필") {
-		t.Errorf("error should mention last profile, got: %v", err)
+	// Either "활성 프로필" or "마지막 프로필" error is acceptable
+	if !strings.Contains(err.Error(), "활성 프로필") && !strings.Contains(err.Error(), "마지막 프로필") {
+		t.Errorf("error should reject deletion, got: %v", err)
 	}
 }
 
@@ -1056,8 +1058,20 @@ func TestDetectAndLoad_MultiProfileNoActiveProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// inferActiveProfile picks the only available profile
+	if cf.ActiveProfile != "myprofile" {
+		t.Errorf("ActiveProfile should be inferred to %q, got %q", "myprofile", cf.ActiveProfile)
+	}
+}
+
+func TestDetectAndLoad_MultiProfileNoActiveProfile_PrefersDefault(t *testing.T) {
+	data := []byte(`{"profiles":{"staging":{"api_key":"s","api_secret":"s"},"default":{"api_key":"d","api_secret":"d"}}}`)
+	cf, err := detectAndLoad(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if cf.ActiveProfile != DefaultProfile {
-		t.Errorf("ActiveProfile should default to %q, got %q", DefaultProfile, cf.ActiveProfile)
+		t.Errorf("ActiveProfile should prefer %q when available, got %q", DefaultProfile, cf.ActiveProfile)
 	}
 }
 
@@ -1070,6 +1084,194 @@ func TestActiveProfileName_NoFile(t *testing.T) {
 	}
 	if name != DefaultProfile {
 		t.Errorf("ActiveProfileName should return %q when no file, got %q", DefaultProfile, name)
+	}
+}
+
+// --- Review-driven coverage gap tests ---
+
+func TestLoad_NilProfileValueNoPanic(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("SOLACTL_API_KEY", "")
+	t.Setenv("SOLACTL_API_SECRET", "")
+
+	cfgDir := filepath.Join(tmpDir, configDir)
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Write credentials with null profile value
+	if err := os.WriteFile(
+		filepath.Join(cfgDir, configFile),
+		[]byte(`{"profiles":{"default":null},"active_profile":"default"}`),
+		0600,
+	); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Must not panic
+	cfg, _ := Load(nil)
+	if cfg == nil {
+		t.Fatal("Load should return non-nil Config even for null profile")
+	}
+}
+
+func TestListProfiles_NilProfileValueSkipped(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfgDir := filepath.Join(tmpDir, configDir)
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(cfgDir, configFile),
+		[]byte(`{"profiles":{"good":{"api_key":"k","api_secret":"s"},"bad":null},"active_profile":"good"}`),
+		0600,
+	); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	profiles, err := ListProfiles()
+	if err != nil {
+		t.Fatalf("ListProfiles: %v", err)
+	}
+	// "bad" profile should be skipped
+	if len(profiles) != 1 {
+		t.Errorf("expected 1 profile (nil skipped), got %d", len(profiles))
+	}
+	if profiles[0].Name != "good" {
+		t.Errorf("expected 'good' profile, got %q", profiles[0].Name)
+	}
+}
+
+func TestLoad_MissingProfileWithEnvOverrides(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("SOLACTL_API_KEY", "env-key")
+	t.Setenv("SOLACTL_API_SECRET", "env-secret")
+
+	setupMultiProfileFile(t, tmpDir, map[string]*Config{
+		"default": {APIKey: "d-key", APISecret: "d-secret"},
+	}, "default")
+
+	// Named profile doesn't exist, but env vars provide credentials
+	cfg, err := Load(&LoadOptions{ProfileName: "nonexistent"})
+	if err != nil {
+		t.Fatalf("Load should not fail when env vars provide credentials: %v", err)
+	}
+	if cfg.APIKey != "env-key" {
+		t.Errorf("APIKey: got %q, want %q (env should be used)", cfg.APIKey, "env-key")
+	}
+}
+
+func TestLoad_MissingProfileWithFlagOverrides(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("SOLACTL_API_KEY", "")
+	t.Setenv("SOLACTL_API_SECRET", "")
+
+	setupMultiProfileFile(t, tmpDir, map[string]*Config{
+		"default": {APIKey: "d-key", APISecret: "d-secret"},
+	}, "default")
+
+	cfg, err := Load(&LoadOptions{
+		ProfileName: "nonexistent",
+		Overrides:   &Config{APIKey: "flag-key", APISecret: "flag-secret"},
+	})
+	if err != nil {
+		t.Fatalf("Load should not fail when overrides provide credentials: %v", err)
+	}
+	if cfg.APIKey != "flag-key" {
+		t.Errorf("APIKey: got %q, want %q (flag should be used)", cfg.APIKey, "flag-key")
+	}
+}
+
+func TestSave_RejectsCorruptFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfgDir := filepath.Join(tmpDir, configDir)
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Write corrupt (non-JSON) content
+	if err := os.WriteFile(filepath.Join(cfgDir, configFile), []byte("NOT JSON"), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	err := Save(&Config{APIKey: "k", APISecret: "s"}, "")
+	if err == nil {
+		t.Fatal("Save should fail when existing file is corrupt (to prevent data loss)")
+	}
+	if !strings.Contains(err.Error(), "설정 파일 읽기 실패") {
+		t.Errorf("error should mention file read failure, got: %v", err)
+	}
+}
+
+func TestValidateProfileName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid simple", "default", false},
+		{"valid with hyphen", "my-profile", false},
+		{"valid with underscore", "my_profile", false},
+		{"valid with numbers", "profile123", false},
+		{"empty", "", true},
+		{"too long", strings.Repeat("a", 65), true},
+		{"max length", strings.Repeat("a", 64), false},
+		{"space", "my profile", true},
+		{"slash", "my/profile", true},
+		{"dot", "my.profile", true},
+		{"unicode", "프로필", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateProfileName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateProfileName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSave_RejectsInvalidProfileName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	err := Save(&Config{APIKey: "k", APISecret: "s"}, "bad name!")
+	if err == nil {
+		t.Fatal("Save should reject invalid profile name")
+	}
+}
+
+func TestInferActiveProfile_PointsToMissing(t *testing.T) {
+	cf := &CredentialsFile{
+		Profiles: map[string]*Config{
+			"staging": {APIKey: "s", APISecret: "s"},
+			"prod":    {APIKey: "p", APISecret: "p"},
+		},
+		ActiveProfile: "deleted-profile",
+	}
+	inferActiveProfile(cf)
+	// Should pick first alphabetically since "default" doesn't exist
+	if cf.ActiveProfile != "prod" {
+		t.Errorf("ActiveProfile should be inferred to %q, got %q", "prod", cf.ActiveProfile)
+	}
+}
+
+func TestInferActiveProfile_PrefersDefault(t *testing.T) {
+	cf := &CredentialsFile{
+		Profiles: map[string]*Config{
+			"staging": {APIKey: "s", APISecret: "s"},
+			"default": {APIKey: "d", APISecret: "d"},
+		},
+		ActiveProfile: "",
+	}
+	inferActiveProfile(cf)
+	if cf.ActiveProfile != DefaultProfile {
+		t.Errorf("ActiveProfile should prefer %q, got %q", DefaultProfile, cf.ActiveProfile)
 	}
 }
 

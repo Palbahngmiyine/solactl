@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -15,8 +16,11 @@ func init() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			profiles, err := config.ListProfiles()
 			if err != nil {
-				_, _ = fmt.Fprintf(errOut(), "프로필이 없습니다. 'solactl configure'를 실행하세요.\n")
-				return nil
+				if os.IsNotExist(err) {
+					_, _ = fmt.Fprintf(errOut(), "프로필이 없습니다. 'solactl configure'를 실행하세요.\n")
+					return nil
+				}
+				return fmt.Errorf("프로필 목록 조회 실패: %w", err)
 			}
 
 			if len(profiles) == 0 {
