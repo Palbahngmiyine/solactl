@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3224,7 +3225,7 @@ func TestSendSMS_AutoFromSingle(t *testing.T) {
 }
 
 func TestSendSMS_AutoFromMultiple(t *testing.T) {
-	var sendCalled bool
+	var sendCalled atomic.Bool
 
 	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "senderid") {
@@ -3232,7 +3233,7 @@ func TestSendSMS_AutoFromMultiple(t *testing.T) {
 			_, _ = w.Write([]byte(`["01012345678","01099998888"]`))
 			return
 		}
-		sendCalled = true
+		sendCalled.Store(true)
 		t.Fatal("send endpoint should not be called when multiple senders exist")
 	})
 
@@ -3252,7 +3253,29 @@ func TestSendSMS_AutoFromMultiple(t *testing.T) {
 	if !strings.Contains(err.Error(), "01099998888") {
 		t.Errorf("expected phone 01099998888 in error guidance, got: %v", err)
 	}
-	if sendCalled {
+	if sendCalled.Load() {
 		t.Error("send endpoint should not have been called")
+	}
+}
+
+func TestSendSMS_AutoFromMalformedJSON(t *testing.T) {
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "senderid") {
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{not valid json`))
+			return
+		}
+		t.Fatal("send endpoint should not be called on parse failure")
+	})
+
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "sms", "--to", "01011111111", "--text", "Hello"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for malformed senderid response")
+	}
+	if !strings.Contains(err.Error(), "발신번호 자동 선택 실패") {
+		t.Errorf("expected '발신번호 자동 선택 실패' in error, got: %v", err)
 	}
 }

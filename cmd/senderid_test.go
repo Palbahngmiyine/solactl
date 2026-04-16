@@ -171,7 +171,10 @@ func TestSenderIDList_All(t *testing.T) {
 // ── List JSON Mode ──────────────────────────────────────────────────────
 
 func TestSenderIDList_JSON(t *testing.T) {
-	resp := `{"accountId":"acc1","limit":10,"senderIds":[{"phoneNumber":"01012345678","status":"ACTIVE","method":"ARS","expireAt":"2025-12-31"}]}`
+	resp := `{"accountId":"acc1","limit":10,"senderIds":[
+		{"phoneNumber":"01012345678","status":"ACTIVE","method":"ARS","expireAt":"2025-12-31"},
+		{"phoneNumber":"01099998888","status":"INACTIVE","method":"","expireAt":""}
+	]}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -200,9 +203,14 @@ func TestSenderIDList_JSON(t *testing.T) {
 		t.Errorf("JSON mode should not contain table headers, got:\n%s", output)
 	}
 
-	// Should contain the phone number
+	// Should contain the ACTIVE phone number
 	if !strings.Contains(output, "01012345678") {
-		t.Errorf("expected phone in JSON output, got:\n%s", output)
+		t.Errorf("expected ACTIVE phone in JSON output, got:\n%s", output)
+	}
+
+	// Should NOT contain the INACTIVE phone number (filtered out)
+	if strings.Contains(output, "01099998888") {
+		t.Errorf("INACTIVE phone should be filtered from default JSON output, got:\n%s", output)
 	}
 }
 
@@ -657,7 +665,6 @@ func TestSenderIDList_AllFieldsEmpty(t *testing.T) {
 	defer server.Close()
 
 	buf := setupSenderIDTest(t, server)
-	flagAll = true
 
 	rootCmd.SetArgs([]string{"senderid", "list", "--all"})
 	if err := rootCmd.Execute(); err != nil {

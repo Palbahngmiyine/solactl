@@ -41,22 +41,33 @@ func runSenderIDList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("발신번호 조회 실패: %w", err)
 	}
 
-	if p.JSONMode {
-		return p.PrintJSON(raw)
-	}
-
 	var info types.SenderIDInfo
 	if err := json.Unmarshal(raw, &info); err != nil {
 		return fmt.Errorf("응답 파싱 실패: %w", err)
+	}
+
+	if !flagAll {
+		active := make([]types.SenderID, 0, len(info.SenderIDs))
+		for _, s := range info.SenderIDs {
+			if s.Status == "ACTIVE" {
+				active = append(active, s)
+			}
+		}
+		info.SenderIDs = active
+	}
+
+	if p.JSONMode {
+		filtered, err := json.Marshal(info)
+		if err != nil {
+			return fmt.Errorf("JSON 변환 실패: %w", err)
+		}
+		return p.PrintJSON(filtered)
 	}
 
 	headers := []string{"PHONE NUMBER", "STATUS", "METHOD", "EXPIRE"}
 	rows := make([][]string, 0, len(info.SenderIDs))
 	for i := range info.SenderIDs {
 		s := &info.SenderIDs[i]
-		if !flagAll && s.Status != "ACTIVE" {
-			continue
-		}
 		rows = append(rows, []string{
 			s.PhoneNumber,
 			s.DisplayStatus(),
