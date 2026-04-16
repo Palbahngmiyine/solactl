@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.4](https://github.com/solapi/solactl/compare/v0.1.3...v0.1.4) (2026-04-16)
+
+
+### Bug Fixes
+
+* add checksum verification, URL validation, and debug log redaction ([ee89639](https://github.com/solapi/solactl/commit/ee89639fc67be559237cb0c038611b41f0ee8c50))
+* add release-assets.githubusercontent.com to trusted hosts ([741e26a](https://github.com/solapi/solactl/commit/741e26a7b6f4bec1438326c29a14e946be7733b9))
+* add supply-chain integrity and debug log hardening ([f491c3d](https://github.com/solapi/solactl/commit/f491c3d234e6a0b27b7de0721018d6163bb9ede5))
+* address review issues from pr-review-toolkit and codex ([22e7699](https://github.com/solapi/solactl/commit/22e7699fb211d588379a2af0930e080e42ac49af))
+* address round-2 codex review issues ([da54cf6](https://github.com/solapi/solactl/commit/da54cf64e9434ae45c1077db7d5f163955603046))
+* handle top-level JSON array in debug log redaction ([7940ce0](https://github.com/solapi/solactl/commit/7940ce0a581dbbfdafc25894f3f66042c2fb1da4))
+
 ## [0.1.3](https://github.com/solapi/solactl/compare/v0.1.2...v0.1.3) (2026-04-15)
 
 
