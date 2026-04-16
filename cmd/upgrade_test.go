@@ -32,7 +32,6 @@ func resetUpgradeState(t *testing.T) {
 		copyFileFunc = copyFile
 		verifyChecksumFunc = verifyChecksum
 		validateAssetURLFunc = validateAssetURL
-		allowedDownloadHosts = []string{"github.com", "objects.githubusercontent.com"}
 		flagTimeout = 30 * time.Second
 		clientOverride = nil
 		outWriter = nil
@@ -81,17 +80,6 @@ func setupUpgradeServer(t *testing.T, release githubRelease, assetData []byte) *
 	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
-			// Build checksums.txt content for all assets
-			var checksumLines []string
-			if assetData != nil {
-				for _, a := range release.Assets {
-					if a.Name != "checksums.txt" {
-						checksumLines = append(checksumLines, computeSHA256(assetData)+"  "+a.Name)
-					}
-				}
-			}
-			checksumContent := strings.Join(checksumLines, "\n") + "\n"
-
 			// Rewrite asset URLs and inject checksums.txt
 			rel := release
 			for i := range rel.Assets {
@@ -104,9 +92,7 @@ func setupUpgradeServer(t *testing.T, release githubRelease, assetData []byte) *
 				BrowserDownloadURL: ts.URL + "/download/checksums.txt",
 			})
 
-			// Store the checksums content for serving
 			data, _ := json.Marshal(rel)
-			w.Header().Set("X-Checksums", checksumContent)
 			w.WriteHeader(200)
 			_, _ = w.Write(data)
 		case r.URL.Path == "/download/checksums.txt":
@@ -791,6 +777,21 @@ func TestValidateAssetURL(t *testing.T) {
 			url:     "ftp://github.com/solactl.tar.gz",
 			wantErr: "안전하지 않은 다운로드 URL 스킴",
 		},
+		{
+			name:    "subdomain of trusted host rejected",
+			url:     "https://evil.github.com/solactl.tar.gz",
+			wantErr: "신뢰할 수 없는 다운로드 호스트",
+		},
+		{
+			name:    "trusted host as subdomain of attacker rejected",
+			url:     "https://github.com.evil.com/solactl.tar.gz",
+			wantErr: "신뢰할 수 없는 다운로드 호스트",
+		},
+		{
+			name:    "subdomain of objects.githubusercontent.com rejected",
+			url:     "https://sub.objects.githubusercontent.com/path",
+			wantErr: "신뢰할 수 없는 다운로드 호스트",
+		},
 	}
 
 	for _, tt := range tests {
@@ -814,6 +815,8 @@ func TestValidateAssetURL(t *testing.T) {
 
 func TestVerifyChecksum_Valid(t *testing.T) {
 	resetUpgradeState(t)
+	// Allow http for test server URLs
+	validateAssetURLFunc = func(string) error { return nil }
 
 	assetData := buildTarGz(t, "solactl")
 	assetName := "solactl_1.0.0_linux_amd64.tar.gz"
@@ -847,6 +850,7 @@ func TestVerifyChecksum_Valid(t *testing.T) {
 
 func TestVerifyChecksum_Mismatch(t *testing.T) {
 	resetUpgradeState(t)
+	validateAssetURLFunc = func(string) error { return nil }
 
 	assetData := buildTarGz(t, "solactl")
 	assetName := "solactl_1.0.0_linux_amd64.tar.gz"
@@ -900,6 +904,7 @@ func TestVerifyChecksum_MissingChecksumsTxt(t *testing.T) {
 
 func TestVerifyChecksum_AssetNotInChecksums(t *testing.T) {
 	resetUpgradeState(t)
+	validateAssetURLFunc = func(string) error { return nil }
 
 	checksumBody := "abc123  other_file.tar.gz\n"
 
@@ -927,6 +932,75 @@ func TestVerifyChecksum_AssetNotInChecksums(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "해시를 찾을 수 없습니다") {
 		t.Errorf("error should mention hash not found, got: %v", err)
+	}
+}
+
+func TestVerifyChecksum_InvalidHashFormat(t *testing.T) {
+	resetUpgradeState(t)
+	validateAssetURLFunc = func(string) error { return nil }
+
+	assetName := "solactl_1.0.0_linux_amd64.tar.gz"
+	// Hash that is wrong length (not 64 chars)
+	checksumBody := "tooshort  " + assetName + "\n"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(checksumBody))
+	}))
+	t.Cleanup(ts.Close)
+
+	tmpDir := t.TempDir()
+	archivePath := filepath.Join(tmpDir, assetName)
+	if err := os.WriteFile(archivePath, []byte("data"), 0644); err != nil {
+		t.Fatalf("write test archive: %v", err)
+	}
+
+	release := githubRelease{
+		Assets: []githubAsset{
+			{Name: "checksums.txt", BrowserDownloadURL: ts.URL + "/checksums.txt"},
+		},
+	}
+
+	err := verifyChecksum(context.Background(), ts.Client(), release, archivePath, assetName)
+	if err == nil {
+		t.Fatal("expected error for invalid hash format")
+	}
+	if !strings.Contains(err.Error(), "해시 길이가 잘못") {
+		t.Errorf("error should mention invalid hash length, got: %v", err)
+	}
+}
+
+func TestVerifyChecksum_CaseInsensitiveHash(t *testing.T) {
+	resetUpgradeState(t)
+	validateAssetURLFunc = func(string) error { return nil }
+
+	assetData := buildTarGz(t, "solactl")
+	assetName := "solactl_1.0.0_linux_amd64.tar.gz"
+	// Use uppercase hash — should still match
+	expectedHash := strings.ToUpper(computeSHA256(assetData))
+	checksumBody := expectedHash + "  " + assetName + "\n"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(checksumBody))
+	}))
+	t.Cleanup(ts.Close)
+
+	tmpDir := t.TempDir()
+	archivePath := filepath.Join(tmpDir, assetName)
+	if err := os.WriteFile(archivePath, assetData, 0644); err != nil {
+		t.Fatalf("write test archive: %v", err)
+	}
+
+	release := githubRelease{
+		Assets: []githubAsset{
+			{Name: "checksums.txt", BrowserDownloadURL: ts.URL + "/checksums.txt"},
+		},
+	}
+
+	err := verifyChecksum(context.Background(), ts.Client(), release, archivePath, assetName)
+	if err != nil {
+		t.Fatalf("uppercase hash should match (case-insensitive): %v", err)
 	}
 }
 

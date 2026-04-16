@@ -33,10 +33,14 @@ func init() {
 	rootCmd.AddCommand(upgradeCmd)
 }
 
-// allowedDownloadHosts lists trusted hosts for binary downloads.
-var allowedDownloadHosts = []string{
-	"github.com",
-	"objects.githubusercontent.com",
+// isAllowedDownloadHost reports whether host is a trusted download origin.
+func isAllowedDownloadHost(host string) bool {
+	switch host {
+	case "github.com", "objects.githubusercontent.com":
+		return true
+	default:
+		return false
+	}
 }
 
 // Test seams
@@ -58,6 +62,24 @@ type githubRelease struct {
 type githubAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+// newTrustedHTTPClient returns an HTTP client that rejects redirects to
+// untrusted hosts. This prevents a trusted initial URL from being redirected
+// to an attacker-controlled server.
+func newTrustedHTTPClient(base *http.Client) *http.Client {
+	c := *base // shallow copy
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("너무 많은 리다이렉트")
+		}
+		host := req.URL.Hostname()
+		if req.URL.Scheme != "https" || !isAllowedDownloadHost(host) {
+			return fmt.Errorf("리다이렉트 대상이 신뢰할 수 없음: %s", req.URL.Host)
+		}
+		return nil
+	}
+	return &c
 }
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
@@ -147,14 +169,17 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
+	// Use a redirect-validating client for file downloads
+	trustedC := newTrustedHTTPClient(httpC)
+
 	archivePath := filepath.Join(tmpDir, assetName)
-	if err := downloadFile(ctx(), httpC, assetURL, archivePath); err != nil {
+	if err := downloadFile(ctx(), trustedC, assetURL, archivePath); err != nil {
 		return fmt.Errorf("다운로드 실패: %w", err)
 	}
 
 	// 4a. Verify checksum
 	_, _ = fmt.Fprintln(w, "체크섬 검증 중...")
-	if err := verifyChecksumFunc(ctx(), httpC, release, archivePath, assetName); err != nil {
+	if err := verifyChecksumFunc(ctx(), trustedC, release, archivePath, assetName); err != nil {
 		return fmt.Errorf("체크섬 검증 실패: %w", err)
 	}
 
@@ -218,7 +243,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// validateAssetURL ensures the download URL points to a trusted host.
+// validateAssetURL ensures the download URL uses HTTPS and points to a trusted host.
 func validateAssetURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -227,17 +252,16 @@ func validateAssetURL(rawURL string) error {
 	if u.Scheme != "https" {
 		return fmt.Errorf("안전하지 않은 다운로드 URL 스킴: %s (https 필수)", u.Scheme)
 	}
-	host := u.Hostname()
-	for _, allowed := range allowedDownloadHosts {
-		if host == allowed {
-			return nil
-		}
+	if !isAllowedDownloadHost(u.Hostname()) {
+		return fmt.Errorf("신뢰할 수 없는 다운로드 호스트: %s", u.Hostname())
 	}
-	return fmt.Errorf("신뢰할 수 없는 다운로드 호스트: %s", host)
+	return nil
 }
 
-// verifyChecksum downloads checksums.txt from the release and verifies the
-// SHA256 hash of the downloaded archive.
+// verifyChecksum downloads checksums.txt from the GitHub release assets and
+// verifies the SHA256 hash of the downloaded archive. Returns an error if
+// checksums.txt is missing from the release (verification is mandatory).
+// Expected format: "<hex-sha256>  <filename>\n" per line (whitespace-separated).
 func verifyChecksum(reqCtx context.Context, httpC *http.Client, release githubRelease, archivePath, assetName string) error {
 	// Find checksums.txt asset
 	var checksumURL string
@@ -249,6 +273,11 @@ func verifyChecksum(reqCtx context.Context, httpC *http.Client, release githubRe
 	}
 	if checksumURL == "" {
 		return fmt.Errorf("릴리스에 checksums.txt가 없습니다 (무결성 검증 불가)")
+	}
+
+	// Validate checksums.txt URL against the same trusted-host allowlist
+	if err := validateAssetURLFunc(checksumURL); err != nil {
+		return fmt.Errorf("체크섬 다운로드 URL 검증 실패: %w", err)
 	}
 
 	// Download checksums.txt
@@ -282,6 +311,14 @@ func verifyChecksum(reqCtx context.Context, httpC *http.Client, release githubRe
 	}
 	if expectedHash == "" {
 		return fmt.Errorf("checksums.txt에서 %s의 해시를 찾을 수 없습니다", assetName)
+	}
+
+	// Validate hash format (must be 64 hex characters for SHA256)
+	if len(expectedHash) != 64 {
+		return fmt.Errorf("checksums.txt의 해시 길이가 잘못되었습니다: %d (SHA256은 64자)", len(expectedHash))
+	}
+	if _, err := hex.DecodeString(expectedHash); err != nil {
+		return fmt.Errorf("checksums.txt의 해시 형식이 잘못되었습니다: %w", err)
 	}
 
 	// Compute SHA256 of downloaded archive

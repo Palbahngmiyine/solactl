@@ -25,9 +25,10 @@ import (
 const BaseURL = "https://api.solapi.com"
 
 // sensitiveFieldPattern matches JSON fields that should be redacted in debug logs.
-// Covers senderKeys, groupKeys, and similar secret fields from API responses.
+// Matches the explicit set: apiKey, apiSecret, senderKey(s), groupKey(s), secretKey.
+// Only string-typed values are matched; non-string values are not redacted.
 var sensitiveFieldPattern = regexp.MustCompile(
-	`"(senderKey[s]?|groupKey[s]?|secretKey|apiSecret)":\s*"[^"]*"`,
+	`"(apiKey|apiSecret|senderKey[s]?|groupKey[s]?|secretKey)":\s*"[^"]*"`,
 )
 
 // redactSensitiveFields replaces known sensitive JSON field values with "[REDACTED]".
@@ -190,12 +191,13 @@ func (c *Client) doRequest(ctx context.Context, method, rawURL string, body []by
 
 	logger.Debug("<-- %d %s (%v)", resp.StatusCode, resp.Status, elapsed)
 	if logger.IsEnabled() && len(respBody) > 0 {
-		preview := string(respBody)
+		// Redact before truncation to prevent partial secret exposure at the cut point
+		preview := redactSensitiveFields(string(respBody))
 		runes := []rune(preview)
 		if len(runes) > 500 {
 			preview = string(runes[:500]) + "..."
 		}
-		logger.Debug("    body: %s", redactSensitiveFields(preview))
+		logger.Debug("    body: %s", preview)
 	}
 
 	if resp.StatusCode >= 400 {

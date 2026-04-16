@@ -831,6 +831,11 @@ func TestRedactSensitiveFields(t *testing.T) {
 			want:  `{"senderKeys": "[REDACTED]","groupKeys": "[REDACTED]","name":"safe"}`,
 		},
 		{
+			name:  "apiKey redacted",
+			input: `{"apiKey":"NCSABC123","apiSecret":"secret456"}`,
+			want:  `{"apiKey": "[REDACTED]","apiSecret": "[REDACTED]"}`,
+		},
+		{
 			name:  "no sensitive fields unchanged",
 			input: `{"channelId":"CH01","name":"test","status":"ACTIVE"}`,
 			want:  `{"channelId":"CH01","name":"test","status":"ACTIVE"}`,

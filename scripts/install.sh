@@ -48,9 +48,11 @@ echo "Downloading checksums..."
 curl -fsSL -o "${TMPDIR}/checksums.txt" "$CHECKSUMS_URL" || die "Checksum download failed: ${CHECKSUMS_URL}"
 
 echo "Verifying checksum..."
+# sha256sum/shasum output format: "<hash>  <filename>" (two spaces between hash and name)
 EXPECTED_HASH=$(grep "  ${ARCHIVE_NAME}$" "${TMPDIR}/checksums.txt" | awk '{print $1}')
 [ -n "$EXPECTED_HASH" ] || die "Checksum not found for ${ARCHIVE_NAME} in checksums.txt"
-ACTUAL_HASH=$(cd "$TMPDIR" && $SHA256CMD "$ARCHIVE_NAME" | awk '{print $1}')
+ACTUAL_HASH=$(cd "$TMPDIR" && $SHA256CMD "$ARCHIVE_NAME" | awk '{print $1}') || die "SHA256 computation failed for ${ARCHIVE_NAME}"
+[ -n "$ACTUAL_HASH" ] || die "SHA256 computation produced empty result for ${ARCHIVE_NAME}"
 if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
   die "Checksum mismatch: expected ${EXPECTED_HASH}, got ${ACTUAL_HASH}. File may be tampered."
 fi
