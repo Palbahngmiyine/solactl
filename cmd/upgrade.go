@@ -34,9 +34,12 @@ func init() {
 }
 
 // isAllowedDownloadHost reports whether host is a trusted download origin.
+// GitHub redirects release asset downloads through these domains.
 func isAllowedDownloadHost(host string) bool {
 	switch host {
-	case "github.com", "objects.githubusercontent.com":
+	case "github.com",
+		"objects.githubusercontent.com",
+		"release-assets.githubusercontent.com":
 		return true
 	default:
 		return false
