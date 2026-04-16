@@ -61,20 +61,25 @@ func setupSenderIDTest(t *testing.T, server *httptest.Server) *bytes.Buffer {
 // ── List Active ─────────────────────────────────────────────────────────
 
 func TestSenderIDList_Active(t *testing.T) {
-	activeResp := `[
-		{"phoneNumber":"01012345678","status":"ACTIVE","method":"ARS","expireAt":"2025-12-31T23:59:59"},
-		{"phoneNumber":"01087654321","status":"ACTIVE","method":"DOCUMENT","expireAt":""}
-	]`
+	resp := `{
+		"accountId": "acc1",
+		"limit": 10,
+		"senderIds": [
+			{"phoneNumber":"01012345678","status":"ACTIVE","method":"ARS","expireAt":"2025-12-31T23:59:59"},
+			{"phoneNumber":"01099998888","status":"INACTIVE","method":"","expireAt":""},
+			{"phoneNumber":"01087654321","status":"ACTIVE","method":"DOCUMENT","expireAt":""}
+		]
+	}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", r.Method)
 		}
-		if !strings.HasSuffix(r.URL.Path, "/senderid/v1/numbers/active") {
+		if !strings.HasSuffix(r.URL.Path, "/senderid/v1/numbers") {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, activeResp)
+		_, _ = io.WriteString(w, resp)
 	}))
 	defer server.Close()
 
@@ -95,7 +100,7 @@ func TestSenderIDList_Active(t *testing.T) {
 		t.Errorf("expected STATUS header, got:\n%s", output)
 	}
 
-	// Verify data rows
+	// Verify ACTIVE entries are shown
 	if !strings.Contains(output, "01012345678") {
 		t.Errorf("expected phone 01012345678 in output, got:\n%s", output)
 	}
@@ -108,9 +113,13 @@ func TestSenderIDList_Active(t *testing.T) {
 	if !strings.Contains(output, "2025-12-31") {
 		t.Errorf("expected expire date 2025-12-31 in output, got:\n%s", output)
 	}
-	// Empty expireAt should show "-"
-	if !strings.Contains(output, "-") {
-		t.Errorf("expected '-' for empty expireAt, got:\n%s", output)
+
+	// Verify INACTIVE entry is filtered out
+	if strings.Contains(output, "01099998888") {
+		t.Errorf("INACTIVE phone 01099998888 should be filtered out, got:\n%s", output)
+	}
+	if strings.Contains(output, "INACTIVE") {
+		t.Errorf("INACTIVE status should not appear in default list, got:\n%s", output)
 	}
 }
 
@@ -162,11 +171,14 @@ func TestSenderIDList_All(t *testing.T) {
 // ── List JSON Mode ──────────────────────────────────────────────────────
 
 func TestSenderIDList_JSON(t *testing.T) {
-	activeResp := `[{"phoneNumber":"01012345678","status":"ACTIVE","method":"ARS","expireAt":"2025-12-31"}]`
+	resp := `{"accountId":"acc1","limit":10,"senderIds":[
+		{"phoneNumber":"01012345678","status":"ACTIVE","method":"ARS","expireAt":"2025-12-31"},
+		{"phoneNumber":"01099998888","status":"INACTIVE","method":"","expireAt":""}
+	]}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, activeResp)
+		_, _ = io.WriteString(w, resp)
 	}))
 	defer server.Close()
 
@@ -191,9 +203,105 @@ func TestSenderIDList_JSON(t *testing.T) {
 		t.Errorf("JSON mode should not contain table headers, got:\n%s", output)
 	}
 
-	// Should contain the phone number
+	// Should contain the ACTIVE phone number
 	if !strings.Contains(output, "01012345678") {
-		t.Errorf("expected phone in JSON output, got:\n%s", output)
+		t.Errorf("expected ACTIVE phone in JSON output, got:\n%s", output)
+	}
+
+	// Should NOT contain the INACTIVE phone number (filtered out)
+	if strings.Contains(output, "01099998888") {
+		t.Errorf("INACTIVE phone should be filtered from default JSON output, got:\n%s", output)
+	}
+}
+
+func TestSenderIDList_AllJSON(t *testing.T) {
+	resp := `{"accountId":"acc1","limit":10,"senderIds":[
+		{"phoneNumber":"01012345678","status":"ACTIVE","method":"ARS","expireAt":"2025-12-31"},
+		{"phoneNumber":"01099998888","status":"INACTIVE","method":"","expireAt":""}
+	]}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, resp)
+	}))
+	defer server.Close()
+
+	buf := setupSenderIDTest(t, server)
+	flagJSON = true
+
+	rootCmd.SetArgs([]string{"senderid", "list", "--all", "--json"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should be valid JSON
+	var parsed json.RawMessage
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &parsed); err != nil {
+		t.Errorf("output is not valid JSON: %v\noutput:\n%s", err, output)
+	}
+
+	// --all --json should include BOTH active and inactive entries
+	if !strings.Contains(output, "01012345678") {
+		t.Errorf("expected ACTIVE phone in --all --json output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "01099998888") {
+		t.Errorf("expected INACTIVE phone in --all --json output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "INACTIVE") {
+		t.Errorf("expected INACTIVE status in --all --json output, got:\n%s", output)
+	}
+}
+
+func TestSenderIDList_JSON_AllInactive(t *testing.T) {
+	resp := `{"accountId":"acc1","limit":10,"senderIds":[
+		{"phoneNumber":"01099998888","status":"INACTIVE","method":"","expireAt":""},
+		{"phoneNumber":"01077776666","status":"PENDING","method":"ARS","expireAt":""}
+	]}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, resp)
+	}))
+	defer server.Close()
+
+	buf := setupSenderIDTest(t, server)
+	flagJSON = true
+
+	rootCmd.SetArgs([]string{"senderid", "list", "--json"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := strings.TrimSpace(buf.String())
+
+	// Should be valid JSON
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(output), &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput:\n%s", err, output)
+	}
+
+	// senderIds should be an empty array after filtering
+	if !strings.Contains(output, `"senderIds":[]`) && !strings.Contains(output, `"senderIds": []`) {
+		// Parse and check programmatically for robustness
+		var info struct {
+			SenderIDs []json.RawMessage `json:"senderIds"`
+		}
+		if err := json.Unmarshal([]byte(output), &info); err != nil {
+			t.Fatalf("failed to parse senderIds: %v", err)
+		}
+		if len(info.SenderIDs) != 0 {
+			t.Errorf("expected empty senderIds after filtering, got %d entries", len(info.SenderIDs))
+		}
+	}
+
+	// Should NOT contain any sender phone numbers
+	if strings.Contains(output, "01099998888") {
+		t.Errorf("INACTIVE phone should not appear in default JSON output, got:\n%s", output)
+	}
+	if strings.Contains(output, "01077776666") {
+		t.Errorf("PENDING phone should not appear in default JSON output, got:\n%s", output)
 	}
 }
 
@@ -520,7 +628,7 @@ func TestSenderIDList_APIError(t *testing.T) {
 func TestSenderIDList_EmptyActive(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `[]`)
+		_, _ = io.WriteString(w, `{"accountId":"acc1","limit":10,"senderIds":[]}`)
 	}))
 	defer server.Close()
 
@@ -638,18 +746,18 @@ func TestSenderIDList_MalformedJSON(t *testing.T) {
 // ── Table Formatting Edge Cases ─────────────────────────────────────────
 
 func TestSenderIDList_AllFieldsEmpty(t *testing.T) {
-	// SenderID with all empty optional fields
-	activeResp := `[{"phoneNumber":"01000000000","status":"","method":"","expireAt":""}]`
+	// SenderID with all empty optional fields — use --all to show entries without ACTIVE status
+	resp := `{"accountId":"acc1","limit":10,"senderIds":[{"phoneNumber":"01000000000","status":"","method":"","expireAt":""}]}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, activeResp)
+		_, _ = io.WriteString(w, resp)
 	}))
 	defer server.Close()
 
 	buf := setupSenderIDTest(t, server)
 
-	rootCmd.SetArgs([]string{"senderid", "list"})
+	rootCmd.SetArgs([]string{"senderid", "list", "--all"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

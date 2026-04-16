@@ -251,25 +251,24 @@ func resolveFrom(c *client.Client) (string, error) {
 		return "", fmt.Errorf("발신번호(--from)를 입력하세요 (발신번호 조회 실패: %w)", err)
 	}
 
-	var senders []types.SenderID
-	if err := json.Unmarshal(raw, &senders); err != nil {
+	var phones []string
+	if err := json.Unmarshal(raw, &phones); err != nil {
 		return "", fmt.Errorf("발신번호 자동 선택 실패 (응답 파싱 오류: %w). --from으로 직접 지정하세요", err)
 	}
 
-	switch len(senders) {
+	switch len(phones) {
 	case 0:
 		return "", fmt.Errorf("등록된 활성 발신번호가 없습니다. solactl senderid list로 확인하세요")
 	case 1:
-		selected := senders[0].PhoneNumber
-		_, _ = fmt.Fprintf(errOut(), "발신번호 자동 선택: %s\n", selected)
-		return selected, nil
+		_, _ = fmt.Fprintf(errOut(), "발신번호 자동 선택: %s\n", phones[0])
+		return phones[0], nil
 	default:
 		var lines []string
-		for _, s := range senders {
-			lines = append(lines, "  "+s.PhoneNumber)
+		for _, phone := range phones {
+			lines = append(lines, "  "+phone)
 		}
 		return "", fmt.Errorf("활성 발신번호가 %d개입니다. --from으로 지정하세요:\n%s",
-			len(senders), strings.Join(lines, "\n"))
+			len(phones), strings.Join(lines, "\n"))
 	}
 }
 
