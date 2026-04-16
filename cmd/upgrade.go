@@ -73,8 +73,13 @@ func newTrustedHTTPClient(base *http.Client) *http.Client {
 		if len(via) >= 10 {
 			return fmt.Errorf("너무 많은 리다이렉트")
 		}
-		host := req.URL.Hostname()
-		if req.URL.Scheme != "https" || !isAllowedDownloadHost(host) {
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("리다이렉트 대상이 신뢰할 수 없음: %s", req.URL.Host)
+		}
+		if port := req.URL.Port(); port != "" && port != "443" {
+			return fmt.Errorf("리다이렉트 대상이 비표준 포트 사용: %s", req.URL.Host)
+		}
+		if !isAllowedDownloadHost(req.URL.Hostname()) {
 			return fmt.Errorf("리다이렉트 대상이 신뢰할 수 없음: %s", req.URL.Host)
 		}
 		return nil
@@ -243,7 +248,8 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// validateAssetURL ensures the download URL uses HTTPS and points to a trusted host.
+// validateAssetURL ensures the download URL uses HTTPS and points to a trusted host
+// on the standard port (443). Non-standard ports are rejected to prevent bypass.
 func validateAssetURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -251,6 +257,9 @@ func validateAssetURL(rawURL string) error {
 	}
 	if u.Scheme != "https" {
 		return fmt.Errorf("안전하지 않은 다운로드 URL 스킴: %s (https 필수)", u.Scheme)
+	}
+	if port := u.Port(); port != "" && port != "443" {
+		return fmt.Errorf("비표준 포트 사용 불가: %s", port)
 	}
 	if !isAllowedDownloadHost(u.Hostname()) {
 		return fmt.Errorf("신뢰할 수 없는 다운로드 호스트: %s", u.Hostname())

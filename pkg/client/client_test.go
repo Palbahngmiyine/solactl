@@ -791,67 +791,106 @@ func TestBaseURL_DefaultAndOverride(t *testing.T) {
 
 func TestRedactSensitiveFields(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		want  string
+		name           string
+		input          string
+		mustContain    []string
+		mustNotContain []string
 	}{
 		{
-			name:  "senderKeys redacted",
-			input: `{"channelId":"CH01","senderKeys":"secret123"}`,
-			want:  `{"channelId":"CH01","senderKeys": "[REDACTED]"}`,
+			name:           "senderKeys string redacted",
+			input:          `{"channelId":"CH01","senderKeys":"secret123"}`,
+			mustContain:    []string{`"senderKeys":"[REDACTED]"`, `"channelId":"CH01"`},
+			mustNotContain: []string{"secret123"},
 		},
 		{
-			name:  "senderKey singular redacted",
-			input: `{"senderKey":"abc-def-123"}`,
-			want:  `{"senderKey": "[REDACTED]"}`,
+			name:           "senderKey singular redacted",
+			input:          `{"senderKey":"abc-def-123"}`,
+			mustContain:    []string{`"senderKey":"[REDACTED]"`},
+			mustNotContain: []string{"abc-def-123"},
 		},
 		{
-			name:  "groupKeys redacted",
-			input: `{"name":"test","groupKeys":"gk-secret"}`,
-			want:  `{"name":"test","groupKeys": "[REDACTED]"}`,
+			name:           "groupKeys redacted",
+			input:          `{"name":"test","groupKeys":"gk-secret"}`,
+			mustContain:    []string{`"groupKeys":"[REDACTED]"`, `"name":"test"`},
+			mustNotContain: []string{"gk-secret"},
 		},
 		{
-			name:  "groupKey singular redacted",
-			input: `{"groupKey":"gk-single"}`,
-			want:  `{"groupKey": "[REDACTED]"}`,
+			name:           "groupKey singular redacted",
+			input:          `{"groupKey":"gk-single"}`,
+			mustContain:    []string{`"groupKey":"[REDACTED]"`},
+			mustNotContain: []string{"gk-single"},
 		},
 		{
-			name:  "secretKey redacted",
-			input: `{"secretKey":"very-secret-value"}`,
-			want:  `{"secretKey": "[REDACTED]"}`,
+			name:           "secretKey redacted",
+			input:          `{"secretKey":"very-secret-value"}`,
+			mustContain:    []string{`"secretKey":"[REDACTED]"`},
+			mustNotContain: []string{"very-secret-value"},
 		},
 		{
-			name:  "apiSecret redacted",
-			input: `{"apiSecret":"my-api-secret-123"}`,
-			want:  `{"apiSecret": "[REDACTED]"}`,
+			name:           "apiSecret redacted",
+			input:          `{"apiSecret":"my-api-secret-123"}`,
+			mustContain:    []string{`"apiSecret":"[REDACTED]"`},
+			mustNotContain: []string{"my-api-secret-123"},
 		},
 		{
-			name:  "multiple sensitive fields",
-			input: `{"senderKeys":"sk1","groupKeys":"gk1","name":"safe"}`,
-			want:  `{"senderKeys": "[REDACTED]","groupKeys": "[REDACTED]","name":"safe"}`,
+			name:           "apiKey redacted",
+			input:          `{"apiKey":"NCSABC123","apiSecret":"secret456"}`,
+			mustContain:    []string{`"apiKey":"[REDACTED]"`, `"apiSecret":"[REDACTED]"`},
+			mustNotContain: []string{"NCSABC123", "secret456"},
 		},
 		{
-			name:  "apiKey redacted",
-			input: `{"apiKey":"NCSABC123","apiSecret":"secret456"}`,
-			want:  `{"apiKey": "[REDACTED]","apiSecret": "[REDACTED]"}`,
+			name:           "multiple sensitive fields",
+			input:          `{"senderKeys":"sk1","groupKeys":"gk1","name":"safe"}`,
+			mustContain:    []string{`"senderKeys":"[REDACTED]"`, `"groupKeys":"[REDACTED]"`, `"name":"safe"`},
+			mustNotContain: []string{"sk1", "gk1"},
 		},
 		{
-			name:  "no sensitive fields unchanged",
-			input: `{"channelId":"CH01","name":"test","status":"ACTIVE"}`,
-			want:  `{"channelId":"CH01","name":"test","status":"ACTIVE"}`,
+			name:           "array value redacted",
+			input:          `{"senderKeys":["key1","key2"],"name":"test"}`,
+			mustContain:    []string{`"senderKeys":"[REDACTED]"`, `"name":"test"`},
+			mustNotContain: []string{"key1", "key2"},
 		},
 		{
-			name:  "empty string unchanged",
-			input: "",
-			want:  "",
+			name:           "object value redacted",
+			input:          `{"groupKeys":{"g1":"v1","g2":"v2"},"channelId":"CH01"}`,
+			mustContain:    []string{`"groupKeys":"[REDACTED]"`, `"channelId":"CH01"`},
+			mustNotContain: []string{"v1", "v2"},
+		},
+		{
+			name:           "nested sensitive fields redacted",
+			input:          `{"channels":[{"name":"ch1","senderKey":"sk123"}]}`,
+			mustContain:    []string{`"senderKey":"[REDACTED]"`, `"name":"ch1"`},
+			mustNotContain: []string{"sk123"},
+		},
+		{
+			name:        "no sensitive fields unchanged",
+			input:       `{"channelId":"CH01","name":"test","status":"ACTIVE"}`,
+			mustContain: []string{`"channelId":"CH01"`, `"name":"test"`, `"status":"ACTIVE"`},
+		},
+		{
+			name:        "empty string unchanged",
+			input:       "",
+			mustContain: nil,
+		},
+		{
+			name:        "non-JSON unchanged",
+			input:       "not a json string",
+			mustContain: []string{"not a json string"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := redactSensitiveFields(tt.input)
-			if got != tt.want {
-				t.Errorf("redactSensitiveFields(%q)\n  got:  %q\n  want: %q", tt.input, got, tt.want)
+			for _, s := range tt.mustContain {
+				if !strings.Contains(got, s) {
+					t.Errorf("output should contain %q, got: %s", s, got)
+				}
+			}
+			for _, s := range tt.mustNotContain {
+				if strings.Contains(got, s) {
+					t.Errorf("output should NOT contain %q, got: %s", s, got)
+				}
 			}
 		})
 	}

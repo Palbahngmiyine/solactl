@@ -11,7 +11,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -24,19 +23,56 @@ import (
 // BaseURL is the fixed SOLAPI API endpoint.
 const BaseURL = "https://api.solapi.com"
 
-// sensitiveFieldPattern matches JSON fields that should be redacted in debug logs.
-// Matches the explicit set: apiKey, apiSecret, senderKey(s), groupKey(s), secretKey.
-// Only string-typed values are matched; non-string values are not redacted.
-var sensitiveFieldPattern = regexp.MustCompile(
-	`"(apiKey|apiSecret|senderKey[s]?|groupKey[s]?|secretKey)":\s*"[^"]*"`,
-)
+// sensitiveFields is the set of JSON field names whose values must be
+// redacted in debug logs. Covers apiKey, apiSecret, senderKey(s),
+// groupKey(s), secretKey. Values of any type (string, array, object)
+// are replaced with "[REDACTED]".
+var sensitiveFields = map[string]bool{
+	"apiKey":     true,
+	"apiSecret":  true,
+	"senderKey":  true,
+	"senderKeys": true,
+	"groupKey":   true,
+	"groupKeys":  true,
+	"secretKey":  true,
+}
 
 // redactSensitiveFields replaces known sensitive JSON field values with "[REDACTED]".
+// Uses JSON decoding to handle all value types (strings, arrays, objects).
 func redactSensitiveFields(s string) string {
-	return sensitiveFieldPattern.ReplaceAllStringFunc(s, func(match string) string {
-		idx := strings.Index(match, ":")
-		return match[:idx+1] + ` "[REDACTED]"`
-	})
+	var raw map[string]any
+	if json.Unmarshal([]byte(s), &raw) != nil {
+		return s // not valid JSON, return as-is
+	}
+	redactMap(raw)
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return s
+	}
+	return string(out)
+}
+
+func redactMap(m map[string]any) {
+	for k, v := range m {
+		if sensitiveFields[k] {
+			m[k] = "[REDACTED]"
+			continue
+		}
+		switch val := v.(type) {
+		case map[string]any:
+			redactMap(val)
+		case []any:
+			redactSlice(val)
+		}
+	}
+}
+
+func redactSlice(s []any) {
+	for _, item := range s {
+		if m, ok := item.(map[string]any); ok {
+			redactMap(m)
+		}
+	}
 }
 
 // Client is an HTTP client for SOLAPI REST endpoints.

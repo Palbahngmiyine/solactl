@@ -792,6 +792,15 @@ func TestValidateAssetURL(t *testing.T) {
 			url:     "https://sub.objects.githubusercontent.com/path",
 			wantErr: "신뢰할 수 없는 다운로드 호스트",
 		},
+		{
+			name:    "non-standard port rejected",
+			url:     "https://github.com:8443/solactl.tar.gz",
+			wantErr: "비표준 포트",
+		},
+		{
+			name: "standard port 443 accepted",
+			url:  "https://github.com:443/solactl.tar.gz",
+		},
 	}
 
 	for _, tt := range tests {
