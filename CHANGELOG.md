@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.5](https://github.com/solapi/solactl/compare/v0.1.4...v0.1.5) (2026-04-16)
+
+
+### Bug Fixes
+
+* align senderid list and resolveFrom with actual API response schema ([5990274](https://github.com/solapi/solactl/commit/599027469279aa1d06cc9c9b46363bcd3cd49b58))
+* align senderid list and resolveFrom with actual API response schema ([cf0d40d](https://github.com/solapi/solactl/commit/cf0d40da0425d7fd751754d90decd772f0e5b90f))
+* filter inactive senders in JSON mode and harden tests ([416fcb1](https://github.com/solapi/solactl/commit/416fcb1f03cedc8a138bccfbe5666ca3ac68062c))
+* preserve raw JSON passthrough for --all --json mode ([0d112a6](https://github.com/solapi/solactl/commit/0d112a6095b75d381d9a88aca71aa18c92d1a793))
+
 ## [0.1.4](https://github.com/solapi/solactl/compare/v0.1.3...v0.1.4) (2026-04-16)
 
 
