@@ -27,12 +27,34 @@ echo "Latest version: ${TAG}"
 VERSION="${TAG#v}"
 ARCHIVE_NAME="solactl_${VERSION}_${OS}_${ARCH}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE_NAME}"
+CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${TAG}/checksums.txt"
+
+# Detect SHA256 tool
+if command -v sha256sum &>/dev/null; then
+  SHA256CMD="sha256sum"
+elif command -v shasum &>/dev/null; then
+  SHA256CMD="shasum -a 256"
+else
+  die "sha256sum or shasum is required for checksum verification."
+fi
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 echo "Downloading ${ARCHIVE_NAME}..."
 curl -fsSL -o "${TMPDIR}/${ARCHIVE_NAME}" "$DOWNLOAD_URL" || die "Download failed: ${DOWNLOAD_URL}"
+
+echo "Downloading checksums..."
+curl -fsSL -o "${TMPDIR}/checksums.txt" "$CHECKSUMS_URL" || die "Checksum download failed: ${CHECKSUMS_URL}"
+
+echo "Verifying checksum..."
+EXPECTED_HASH=$(grep "  ${ARCHIVE_NAME}$" "${TMPDIR}/checksums.txt" | awk '{print $1}')
+[ -n "$EXPECTED_HASH" ] || die "Checksum not found for ${ARCHIVE_NAME} in checksums.txt"
+ACTUAL_HASH=$(cd "$TMPDIR" && $SHA256CMD "$ARCHIVE_NAME" | awk '{print $1}')
+if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+  die "Checksum mismatch: expected ${EXPECTED_HASH}, got ${ACTUAL_HASH}. File may be tampered."
+fi
+echo "Checksum verified."
 
 echo "Extracting..."
 tar -xzf "${TMPDIR}/${ARCHIVE_NAME}" -C "$TMPDIR"

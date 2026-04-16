@@ -788,3 +788,66 @@ func TestBaseURL_DefaultAndOverride(t *testing.T) {
 		t.Errorf("cleared baseURL: got %q, want %q", got, BaseURL)
 	}
 }
+
+func TestRedactSensitiveFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "senderKeys redacted",
+			input: `{"channelId":"CH01","senderKeys":"secret123"}`,
+			want:  `{"channelId":"CH01","senderKeys": "[REDACTED]"}`,
+		},
+		{
+			name:  "senderKey singular redacted",
+			input: `{"senderKey":"abc-def-123"}`,
+			want:  `{"senderKey": "[REDACTED]"}`,
+		},
+		{
+			name:  "groupKeys redacted",
+			input: `{"name":"test","groupKeys":"gk-secret"}`,
+			want:  `{"name":"test","groupKeys": "[REDACTED]"}`,
+		},
+		{
+			name:  "groupKey singular redacted",
+			input: `{"groupKey":"gk-single"}`,
+			want:  `{"groupKey": "[REDACTED]"}`,
+		},
+		{
+			name:  "secretKey redacted",
+			input: `{"secretKey":"very-secret-value"}`,
+			want:  `{"secretKey": "[REDACTED]"}`,
+		},
+		{
+			name:  "apiSecret redacted",
+			input: `{"apiSecret":"my-api-secret-123"}`,
+			want:  `{"apiSecret": "[REDACTED]"}`,
+		},
+		{
+			name:  "multiple sensitive fields",
+			input: `{"senderKeys":"sk1","groupKeys":"gk1","name":"safe"}`,
+			want:  `{"senderKeys": "[REDACTED]","groupKeys": "[REDACTED]","name":"safe"}`,
+		},
+		{
+			name:  "no sensitive fields unchanged",
+			input: `{"channelId":"CH01","name":"test","status":"ACTIVE"}`,
+			want:  `{"channelId":"CH01","name":"test","status":"ACTIVE"}`,
+		},
+		{
+			name:  "empty string unchanged",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := redactSensitiveFields(tt.input)
+			if got != tt.want {
+				t.Errorf("redactSensitiveFields(%q)\n  got:  %q\n  want: %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

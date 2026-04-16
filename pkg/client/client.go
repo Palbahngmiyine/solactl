@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -22,6 +23,20 @@ import (
 
 // BaseURL is the fixed SOLAPI API endpoint.
 const BaseURL = "https://api.solapi.com"
+
+// sensitiveFieldPattern matches JSON fields that should be redacted in debug logs.
+// Covers senderKeys, groupKeys, and similar secret fields from API responses.
+var sensitiveFieldPattern = regexp.MustCompile(
+	`"(senderKey[s]?|groupKey[s]?|secretKey|apiSecret)":\s*"[^"]*"`,
+)
+
+// redactSensitiveFields replaces known sensitive JSON field values with "[REDACTED]".
+func redactSensitiveFields(s string) string {
+	return sensitiveFieldPattern.ReplaceAllStringFunc(s, func(match string) string {
+		idx := strings.Index(match, ":")
+		return match[:idx+1] + ` "[REDACTED]"`
+	})
+}
 
 // Client is an HTTP client for SOLAPI REST endpoints.
 type Client struct {
@@ -180,7 +195,7 @@ func (c *Client) doRequest(ctx context.Context, method, rawURL string, body []by
 		if len(runes) > 500 {
 			preview = string(runes[:500]) + "..."
 		}
-		logger.Debug("    body: %s", preview)
+		logger.Debug("    body: %s", redactSensitiveFields(preview))
 	}
 
 	if resp.StatusCode >= 400 {
