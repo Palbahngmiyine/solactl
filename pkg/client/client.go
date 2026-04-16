@@ -39,17 +39,27 @@ var sensitiveFields = map[string]bool{
 
 // redactSensitiveFields replaces known sensitive JSON field values with "[REDACTED]".
 // Uses JSON decoding to handle all value types (strings, arrays, objects).
+// Supports both top-level objects and top-level arrays.
 func redactSensitiveFields(s string) string {
-	var raw map[string]any
+	var raw any
 	if json.Unmarshal([]byte(s), &raw) != nil {
 		return s // not valid JSON, return as-is
 	}
-	redactMap(raw)
+	redactAny(raw)
 	out, err := json.Marshal(raw)
 	if err != nil {
 		return s
 	}
 	return string(out)
+}
+
+func redactAny(v any) {
+	switch val := v.(type) {
+	case map[string]any:
+		redactMap(val)
+	case []any:
+		redactSlice(val)
+	}
 }
 
 func redactMap(m map[string]any) {

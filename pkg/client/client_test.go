@@ -877,6 +877,12 @@ func TestRedactSensitiveFields(t *testing.T) {
 			input:       "not a json string",
 			mustContain: []string{"not a json string"},
 		},
+		{
+			name:           "top-level array with sensitive fields",
+			input:          `[{"apiKey":"key1","name":"ch1"},{"senderKeys":"sk2","name":"ch2"}]`,
+			mustContain:    []string{`"apiKey":"[REDACTED]"`, `"senderKeys":"[REDACTED]"`, `"name":"ch1"`, `"name":"ch2"`},
+			mustNotContain: []string{"key1", "sk2"},
+		},
 	}
 
 	for _, tt := range tests {
