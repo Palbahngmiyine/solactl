@@ -41,6 +41,10 @@ func runSenderIDList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("발신번호 조회 실패: %w", err)
 	}
 
+	if flagAll && p.JSONMode {
+		return p.PrintJSON(raw)
+	}
+
 	var info types.SenderIDInfo
 	if err := json.Unmarshal(raw, &info); err != nil {
 		return fmt.Errorf("응답 파싱 실패: %w", err)
