@@ -788,3 +788,116 @@ func TestBaseURL_DefaultAndOverride(t *testing.T) {
 		t.Errorf("cleared baseURL: got %q, want %q", got, BaseURL)
 	}
 }
+
+func TestRedactSensitiveFields(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		mustContain    []string
+		mustNotContain []string
+	}{
+		{
+			name:           "senderKeys string redacted",
+			input:          `{"channelId":"CH01","senderKeys":"secret123"}`,
+			mustContain:    []string{`"senderKeys":"[REDACTED]"`, `"channelId":"CH01"`},
+			mustNotContain: []string{"secret123"},
+		},
+		{
+			name:           "senderKey singular redacted",
+			input:          `{"senderKey":"abc-def-123"}`,
+			mustContain:    []string{`"senderKey":"[REDACTED]"`},
+			mustNotContain: []string{"abc-def-123"},
+		},
+		{
+			name:           "groupKeys redacted",
+			input:          `{"name":"test","groupKeys":"gk-secret"}`,
+			mustContain:    []string{`"groupKeys":"[REDACTED]"`, `"name":"test"`},
+			mustNotContain: []string{"gk-secret"},
+		},
+		{
+			name:           "groupKey singular redacted",
+			input:          `{"groupKey":"gk-single"}`,
+			mustContain:    []string{`"groupKey":"[REDACTED]"`},
+			mustNotContain: []string{"gk-single"},
+		},
+		{
+			name:           "secretKey redacted",
+			input:          `{"secretKey":"very-secret-value"}`,
+			mustContain:    []string{`"secretKey":"[REDACTED]"`},
+			mustNotContain: []string{"very-secret-value"},
+		},
+		{
+			name:           "apiSecret redacted",
+			input:          `{"apiSecret":"my-api-secret-123"}`,
+			mustContain:    []string{`"apiSecret":"[REDACTED]"`},
+			mustNotContain: []string{"my-api-secret-123"},
+		},
+		{
+			name:           "apiKey redacted",
+			input:          `{"apiKey":"NCSABC123","apiSecret":"secret456"}`,
+			mustContain:    []string{`"apiKey":"[REDACTED]"`, `"apiSecret":"[REDACTED]"`},
+			mustNotContain: []string{"NCSABC123", "secret456"},
+		},
+		{
+			name:           "multiple sensitive fields",
+			input:          `{"senderKeys":"sk1","groupKeys":"gk1","name":"safe"}`,
+			mustContain:    []string{`"senderKeys":"[REDACTED]"`, `"groupKeys":"[REDACTED]"`, `"name":"safe"`},
+			mustNotContain: []string{"sk1", "gk1"},
+		},
+		{
+			name:           "array value redacted",
+			input:          `{"senderKeys":["key1","key2"],"name":"test"}`,
+			mustContain:    []string{`"senderKeys":"[REDACTED]"`, `"name":"test"`},
+			mustNotContain: []string{"key1", "key2"},
+		},
+		{
+			name:           "object value redacted",
+			input:          `{"groupKeys":{"g1":"v1","g2":"v2"},"channelId":"CH01"}`,
+			mustContain:    []string{`"groupKeys":"[REDACTED]"`, `"channelId":"CH01"`},
+			mustNotContain: []string{"v1", "v2"},
+		},
+		{
+			name:           "nested sensitive fields redacted",
+			input:          `{"channels":[{"name":"ch1","senderKey":"sk123"}]}`,
+			mustContain:    []string{`"senderKey":"[REDACTED]"`, `"name":"ch1"`},
+			mustNotContain: []string{"sk123"},
+		},
+		{
+			name:        "no sensitive fields unchanged",
+			input:       `{"channelId":"CH01","name":"test","status":"ACTIVE"}`,
+			mustContain: []string{`"channelId":"CH01"`, `"name":"test"`, `"status":"ACTIVE"`},
+		},
+		{
+			name:        "empty string unchanged",
+			input:       "",
+			mustContain: nil,
+		},
+		{
+			name:        "non-JSON unchanged",
+			input:       "not a json string",
+			mustContain: []string{"not a json string"},
+		},
+		{
+			name:           "top-level array with sensitive fields",
+			input:          `[{"apiKey":"key1","name":"ch1"},{"senderKeys":"sk2","name":"ch2"}]`,
+			mustContain:    []string{`"apiKey":"[REDACTED]"`, `"senderKeys":"[REDACTED]"`, `"name":"ch1"`, `"name":"ch2"`},
+			mustNotContain: []string{"key1", "sk2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := redactSensitiveFields(tt.input)
+			for _, s := range tt.mustContain {
+				if !strings.Contains(got, s) {
+					t.Errorf("output should contain %q, got: %s", s, got)
+				}
+			}
+			for _, s := range tt.mustNotContain {
+				if strings.Contains(got, s) {
+					t.Errorf("output should NOT contain %q, got: %s", s, got)
+				}
+			}
+		})
+	}
+}

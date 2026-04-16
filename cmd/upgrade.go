@@ -3,12 +3,16 @@ package cmd
 import (
 	"archive/tar"
 	"archive/zip"
+	"bufio"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,13 +33,28 @@ func init() {
 	rootCmd.AddCommand(upgradeCmd)
 }
 
+// isAllowedDownloadHost reports whether host is a trusted download origin.
+// GitHub redirects release asset downloads through these domains.
+func isAllowedDownloadHost(host string) bool {
+	switch host {
+	case "github.com",
+		"objects.githubusercontent.com",
+		"release-assets.githubusercontent.com":
+		return true
+	default:
+		return false
+	}
+}
+
 // Test seams
 var (
-	upgradeHTTPClient     *http.Client
-	executablePathFunc    = os.Executable
-	githubBaseURL         = "https://api.github.com"
-	maxExtractSize  int64 = 100 * 1024 * 1024 // 100MB
-	copyFileFunc          = copyFile
+	upgradeHTTPClient      *http.Client
+	executablePathFunc     = os.Executable
+	githubBaseURL          = "https://api.github.com"
+	maxExtractSize   int64 = 100 * 1024 * 1024 // 100MB
+	copyFileFunc           = copyFile
+	verifyChecksumFunc     = verifyChecksum
+	validateAssetURLFunc   = validateAssetURL
 )
 
 type githubRelease struct {
@@ -46,6 +65,29 @@ type githubRelease struct {
 type githubAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+// newTrustedHTTPClient returns an HTTP client that rejects redirects to
+// untrusted hosts. This prevents a trusted initial URL from being redirected
+// to an attacker-controlled server.
+func newTrustedHTTPClient(base *http.Client) *http.Client {
+	c := *base // shallow copy
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("너무 많은 리다이렉트")
+		}
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("리다이렉트 대상이 신뢰할 수 없음: %s", req.URL.Host)
+		}
+		if port := req.URL.Port(); port != "" && port != "443" {
+			return fmt.Errorf("리다이렉트 대상이 비표준 포트 사용: %s", req.URL.Host)
+		}
+		if !isAllowedDownloadHost(req.URL.Hostname()) {
+			return fmt.Errorf("리다이렉트 대상이 신뢰할 수 없음: %s", req.URL.Host)
+		}
+		return nil
+	}
+	return &c
 }
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
@@ -121,6 +163,11 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("현재 플랫폼(%s/%s)에 맞는 릴리스를 찾을 수 없습니다: %s", osName, archName, assetName)
 	}
 
+	// 3a. Validate download URL points to a trusted host
+	if err := validateAssetURLFunc(assetURL); err != nil {
+		return fmt.Errorf("다운로드 URL 검증 실패: %w", err)
+	}
+
 	_, _ = fmt.Fprintf(w, "다운로드 중... %s\n", assetName)
 
 	// 4. Download to temp directory
@@ -130,9 +177,18 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
+	// Use a redirect-validating client for file downloads
+	trustedC := newTrustedHTTPClient(httpC)
+
 	archivePath := filepath.Join(tmpDir, assetName)
-	if err := downloadFile(ctx(), httpC, assetURL, archivePath); err != nil {
+	if err := downloadFile(ctx(), trustedC, assetURL, archivePath); err != nil {
 		return fmt.Errorf("다운로드 실패: %w", err)
+	}
+
+	// 4a. Verify checksum
+	_, _ = fmt.Fprintln(w, "체크섬 검증 중...")
+	if err := verifyChecksumFunc(ctx(), trustedC, release, archivePath, assetName); err != nil {
+		return fmt.Errorf("체크섬 검증 실패: %w", err)
 	}
 
 	// 5. Extract binary
@@ -192,6 +248,108 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	_ = os.Remove(backupPath)
 
 	_, _ = fmt.Fprintf(w, "업그레이드 완료! solactl %s\n", release.TagName)
+	return nil
+}
+
+// validateAssetURL ensures the download URL uses HTTPS and points to a trusted host
+// on the standard port (443). Non-standard ports are rejected to prevent bypass.
+func validateAssetURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("다운로드 URL 파싱 실패: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("안전하지 않은 다운로드 URL 스킴: %s (https 필수)", u.Scheme)
+	}
+	if port := u.Port(); port != "" && port != "443" {
+		return fmt.Errorf("비표준 포트 사용 불가: %s", port)
+	}
+	if !isAllowedDownloadHost(u.Hostname()) {
+		return fmt.Errorf("신뢰할 수 없는 다운로드 호스트: %s", u.Hostname())
+	}
+	return nil
+}
+
+// verifyChecksum downloads checksums.txt from the GitHub release assets and
+// verifies the SHA256 hash of the downloaded archive. Returns an error if
+// checksums.txt is missing from the release (verification is mandatory).
+// Expected format: "<hex-sha256>  <filename>\n" per line (whitespace-separated).
+func verifyChecksum(reqCtx context.Context, httpC *http.Client, release githubRelease, archivePath, assetName string) error {
+	// Find checksums.txt asset
+	var checksumURL string
+	for _, a := range release.Assets {
+		if a.Name == "checksums.txt" {
+			checksumURL = a.BrowserDownloadURL
+			break
+		}
+	}
+	if checksumURL == "" {
+		return fmt.Errorf("릴리스에 checksums.txt가 없습니다 (무결성 검증 불가)")
+	}
+
+	// Validate checksums.txt URL against the same trusted-host allowlist
+	if err := validateAssetURLFunc(checksumURL); err != nil {
+		return fmt.Errorf("체크섬 다운로드 URL 검증 실패: %w", err)
+	}
+
+	// Download checksums.txt
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, checksumURL, nil)
+	if err != nil {
+		return fmt.Errorf("체크섬 요청 생성 실패: %w", err)
+	}
+	resp, err := httpC.Do(req)
+	if err != nil {
+		return fmt.Errorf("체크섬 다운로드 실패: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("체크섬 다운로드 실패 (HTTP %d)", resp.StatusCode)
+	}
+
+	// Parse checksums.txt: "<sha256>  <filename>\n"
+	var expectedHash string
+	scanner := bufio.NewScanner(io.LimitReader(resp.Body, 64*1024))
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) == 2 && parts[1] == assetName {
+			expectedHash = parts[0]
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("체크섬 파일 읽기 실패: %w", err)
+	}
+	if expectedHash == "" {
+		return fmt.Errorf("checksums.txt에서 %s의 해시를 찾을 수 없습니다", assetName)
+	}
+
+	// Validate hash format (must be 64 hex characters for SHA256)
+	if len(expectedHash) != 64 {
+		return fmt.Errorf("checksums.txt의 해시 길이가 잘못되었습니다: %d (SHA256은 64자)", len(expectedHash))
+	}
+	if _, err := hex.DecodeString(expectedHash); err != nil {
+		return fmt.Errorf("checksums.txt의 해시 형식이 잘못되었습니다: %w", err)
+	}
+
+	// Compute SHA256 of downloaded archive
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("아카이브 파일 열기 실패: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("해시 계산 실패: %w", err)
+	}
+	actualHash := hex.EncodeToString(h.Sum(nil))
+
+	if !strings.EqualFold(actualHash, expectedHash) {
+		return fmt.Errorf("체크섬 불일치: expected %s, got %s (파일이 변조되었을 수 있음)", expectedHash, actualHash)
+	}
+
 	return nil
 }
 

@@ -23,6 +23,68 @@ import (
 // BaseURL is the fixed SOLAPI API endpoint.
 const BaseURL = "https://api.solapi.com"
 
+// sensitiveFields is the set of JSON field names whose values must be
+// redacted in debug logs. Covers apiKey, apiSecret, senderKey(s),
+// groupKey(s), secretKey. Values of any type (string, array, object)
+// are replaced with "[REDACTED]".
+var sensitiveFields = map[string]bool{
+	"apiKey":     true,
+	"apiSecret":  true,
+	"senderKey":  true,
+	"senderKeys": true,
+	"groupKey":   true,
+	"groupKeys":  true,
+	"secretKey":  true,
+}
+
+// redactSensitiveFields replaces known sensitive JSON field values with "[REDACTED]".
+// Uses JSON decoding to handle all value types (strings, arrays, objects).
+// Supports both top-level objects and top-level arrays.
+func redactSensitiveFields(s string) string {
+	var raw any
+	if json.Unmarshal([]byte(s), &raw) != nil {
+		return s // not valid JSON, return as-is
+	}
+	redactAny(raw)
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return s
+	}
+	return string(out)
+}
+
+func redactAny(v any) {
+	switch val := v.(type) {
+	case map[string]any:
+		redactMap(val)
+	case []any:
+		redactSlice(val)
+	}
+}
+
+func redactMap(m map[string]any) {
+	for k, v := range m {
+		if sensitiveFields[k] {
+			m[k] = "[REDACTED]"
+			continue
+		}
+		switch val := v.(type) {
+		case map[string]any:
+			redactMap(val)
+		case []any:
+			redactSlice(val)
+		}
+	}
+}
+
+func redactSlice(s []any) {
+	for _, item := range s {
+		if m, ok := item.(map[string]any); ok {
+			redactMap(m)
+		}
+	}
+}
+
 // Client is an HTTP client for SOLAPI REST endpoints.
 type Client struct {
 	HTTPClient      *http.Client
@@ -175,7 +237,8 @@ func (c *Client) doRequest(ctx context.Context, method, rawURL string, body []by
 
 	logger.Debug("<-- %d %s (%v)", resp.StatusCode, resp.Status, elapsed)
 	if logger.IsEnabled() && len(respBody) > 0 {
-		preview := string(respBody)
+		// Redact before truncation to prevent partial secret exposure at the cut point
+		preview := redactSensitiveFields(string(respBody))
 		runes := []rune(preview)
 		if len(runes) > 500 {
 			preview = string(runes[:500]) + "..."

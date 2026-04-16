@@ -27,5 +27,8 @@ Thumbs.db
 # GoReleaser
 /dist/
 
+# Claude Code (local settings)
+.claude/
+
 # Documentation (internal only, not committed)
 docs/
