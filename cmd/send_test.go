@@ -3165,3 +3165,94 @@ func TestSendMessages_ValidationError_Stderr(t *testing.T) {
 		t.Errorf("validation output should not appear on stdout, got: %s", stdoutOut)
 	}
 }
+
+// ── resolveFrom auto-selection ─────────────────────────────────────────
+
+func TestSendSMS_AutoFromSingle(t *testing.T) {
+	var mu sync.Mutex
+	var captured types.SendRequest
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if strings.Contains(r.URL.Path, "senderid") {
+			// /numbers/active returns a plain string array
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`["01012345678"]`))
+			return
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+
+		resp := mockSendResponse(1, 1, 0)
+		data, _ := json.Marshal(resp)
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	})
+
+	outBuf := captureBuf(t)
+	errBuf := captureErrBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "sms", "--to", "01011111111", "--text", "Hello"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify auto-selected from address was used
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(captured.Messages))
+	}
+	if captured.Messages[0].From != "01012345678" {
+		t.Errorf("expected from 01012345678, got %q", captured.Messages[0].From)
+	}
+
+	// Verify stderr shows auto-selection message
+	stderrOut := errBuf.String()
+	if !strings.Contains(stderrOut, "발신번호 자동 선택: 01012345678") {
+		t.Errorf("expected auto-select message on stderr, got: %s", stderrOut)
+	}
+
+	// Verify success output
+	stdoutOut := outBuf.String()
+	if !strings.Contains(stdoutOut, "성공") {
+		t.Errorf("expected success message in output, got: %s", stdoutOut)
+	}
+}
+
+func TestSendSMS_AutoFromMultiple(t *testing.T) {
+	var sendCalled bool
+
+	setupSendTest(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "senderid") {
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`["01012345678","01099998888"]`))
+			return
+		}
+		sendCalled = true
+		t.Fatal("send endpoint should not be called when multiple senders exist")
+	})
+
+	captureBuf(t)
+
+	rootCmd.SetArgs([]string{"send", "sms", "--to", "01011111111", "--text", "Hello"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when multiple active senders exist")
+	}
+	if !strings.Contains(err.Error(), "활성 발신번호가 2개") {
+		t.Errorf("expected '활성 발신번호가 2개' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "01012345678") {
+		t.Errorf("expected phone 01012345678 in error guidance, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "01099998888") {
+		t.Errorf("expected phone 01099998888 in error guidance, got: %v", err)
+	}
+	if sendCalled {
+		t.Error("send endpoint should not have been called")
+	}
+}

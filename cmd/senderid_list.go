@@ -36,38 +36,7 @@ func runSenderIDList(cmd *cobra.Command, args []string) error {
 	}
 	p := printer()
 
-	if flagAll {
-		raw, err := c.Get(ctx(), "senderid/v1/numbers", nil)
-		if err != nil {
-			return fmt.Errorf("발신번호 조회 실패: %w", err)
-		}
-
-		if p.JSONMode {
-			return p.PrintJSON(raw)
-		}
-
-		var info types.SenderIDInfo
-		if err := json.Unmarshal(raw, &info); err != nil {
-			return fmt.Errorf("응답 파싱 실패: %w", err)
-		}
-
-		headers := []string{"PHONE NUMBER", "STATUS", "METHOD", "EXPIRE"}
-		rows := make([][]string, 0, len(info.SenderIDs))
-		for i := range info.SenderIDs {
-			s := &info.SenderIDs[i]
-			rows = append(rows, []string{
-				s.PhoneNumber,
-				s.DisplayStatus(),
-				s.DisplayMethod(),
-				s.DisplayExpireAt(),
-			})
-		}
-		p.FormatTable(headers, rows)
-		return nil
-	}
-
-	// Default: active only
-	raw, err := c.Get(ctx(), "senderid/v1/numbers/active", nil)
+	raw, err := c.Get(ctx(), "senderid/v1/numbers", nil)
 	if err != nil {
 		return fmt.Errorf("발신번호 조회 실패: %w", err)
 	}
@@ -76,15 +45,18 @@ func runSenderIDList(cmd *cobra.Command, args []string) error {
 		return p.PrintJSON(raw)
 	}
 
-	var senders []types.SenderID
-	if err := json.Unmarshal(raw, &senders); err != nil {
+	var info types.SenderIDInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
 		return fmt.Errorf("응답 파싱 실패: %w", err)
 	}
 
 	headers := []string{"PHONE NUMBER", "STATUS", "METHOD", "EXPIRE"}
-	rows := make([][]string, 0, len(senders))
-	for i := range senders {
-		s := &senders[i]
+	rows := make([][]string, 0, len(info.SenderIDs))
+	for i := range info.SenderIDs {
+		s := &info.SenderIDs[i]
+		if !flagAll && s.Status != "ACTIVE" {
+			continue
+		}
 		rows = append(rows, []string{
 			s.PhoneNumber,
 			s.DisplayStatus(),
