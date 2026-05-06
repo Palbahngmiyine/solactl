@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.6](https://github.com/solapi/solactl/compare/v0.1.5...v0.1.6) (2026-05-06)
+
+
+### Features
+
+* add quota commands for sending limit requests ([e0bdadb](https://github.com/solapi/solactl/commit/e0bdadbe105c8cef4f931545018f84279d81cf98))
+* **quota:** add quota commands for sending limit requests ([37bef04](https://github.com/solapi/solactl/commit/37bef041be8f0b1f4a0c4afa1b70558d0203974c))
+* **quota:** add quota commands for sending limit requests ([ba413ea](https://github.com/solapi/solactl/commit/ba413ea03b64e0df04fba9b56c4b81c17e91b0ae))
+
+
+### Bug Fixes
+
+* **quota:** send trimmed reason and normalize multi-line list display ([d7a9711](https://github.com/solapi/solactl/commit/d7a9711244bf39f382717a607e3e6d9da2024dfb))
+* **quota:** send trimmed reason and normalize multi-line list display ([24a61d4](https://github.com/solapi/solactl/commit/24a61d4cda195b0195fa17328255a45479d3ea71))
+* **quota:** trim whitespace before measuring --reason length ([ec33a19](https://github.com/solapi/solactl/commit/ec33a19029bfeb230d06d143e32c4bb1174af62b))
+
 ## [0.1.5](https://github.com/solapi/solactl/compare/v0.1.4...v0.1.5) (2026-04-16)
 
 
