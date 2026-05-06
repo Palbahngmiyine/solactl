@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -92,8 +93,12 @@ func runQuotaListRequests(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-// Empty input returns "-" so the table column is not blank.
+// Empty or whitespace-only input renders as "-". Internal whitespace runs
+// (newlines, tabs, repeated spaces) are collapsed to a single space so that
+// multi-line heredoc reasons — which `quota request --help` shows users how
+// to write — do not break FormatTable's per-row layout.
 func truncateReason(s string, maxRunes int) string {
+	s = strings.Join(strings.Fields(s), " ")
 	if s == "" {
 		return "-"
 	}

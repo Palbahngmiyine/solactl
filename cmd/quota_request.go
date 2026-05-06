@@ -62,25 +62,29 @@ func init() {
 	quotaCmd.AddCommand(quotaRequestCmd)
 }
 
-func validateQuotaRequest(target int, reason string) error {
+// Returns the trimmed reason. Length validation runs on the trimmed value,
+// so the trimmed value must also be what we transmit — otherwise the client
+// and the recipient disagree on the boundary.
+func validateQuotaRequest(target int, reason string) (string, error) {
 	if target == 0 {
-		return fmt.Errorf("요청 한도(--target)를 입력하세요")
+		return "", fmt.Errorf("요청 한도(--target)를 입력하세요")
 	}
 	if target < quotaTargetMin || target > quotaTargetMax {
-		return fmt.Errorf("요청 한도는 %s 이상 %s 이하여야 합니다", formatNumber(quotaTargetMin), formatNumber(quotaTargetMax))
+		return "", fmt.Errorf("요청 한도는 %s 이상 %s 이하여야 합니다", formatNumber(quotaTargetMin), formatNumber(quotaTargetMax))
 	}
 	trimmed := strings.TrimSpace(reason)
 	if trimmed == "" {
-		return fmt.Errorf("요청 사유(--reason)를 입력하세요")
+		return "", fmt.Errorf("요청 사유(--reason)를 입력하세요")
 	}
 	if validation.GetRealTextLength(trimmed) > quotaReasonMax {
-		return fmt.Errorf("요청 사유는 %d자 이하여야 합니다", quotaReasonMax)
+		return "", fmt.Errorf("요청 사유는 %d자 이하여야 합니다", quotaReasonMax)
 	}
-	return nil
+	return trimmed, nil
 }
 
 func runQuotaRequest(_ *cobra.Command, _ []string) error {
-	if err := validateQuotaRequest(quotaRequestFlagTarget, quotaRequestFlagReason); err != nil {
+	reason, err := validateQuotaRequest(quotaRequestFlagTarget, quotaRequestFlagReason)
+	if err != nil {
 		return err
 	}
 
@@ -91,7 +95,7 @@ func runQuotaRequest(_ *cobra.Command, _ []string) error {
 
 	body := map[string]any{
 		"quota":           quotaRequestFlagTarget,
-		"reasonRequested": quotaRequestFlagReason,
+		"reasonRequested": reason,
 	}
 
 	raw, err := c.Post(ctx(), "quota/v1/me/system", body)

@@ -271,6 +271,42 @@ func TestQuotaRequest_ReasonTooLong(t *testing.T) {
 	}
 }
 
+func TestQuotaRequest_TrimsReasonBeforeSending(t *testing.T) {
+	// Validation runs on the trimmed reason, so the same trimmed value must be
+	// transmitted — otherwise a 500-rune reason with surrounding whitespace
+	// passes the client check and is rejected server-side.
+	var capturedBody map[string]any
+	setupQuotaTest(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		if err := json.Unmarshal(raw, &capturedBody); err != nil {
+			t.Errorf("unmarshal body %q: %v", raw, err)
+			return
+		}
+		_, _ = io.WriteString(w, `{"handleKey":"QT","status":"PENDING","requestedQuota":1000}`)
+	})
+
+	rawReason := "\t\n  사유 본문  \n\t"
+	rootCmd.SetArgs([]string{"quota", "request", "--target", "1000", "--reason", rawReason})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedBody == nil {
+		t.Fatal("server did not receive body")
+	}
+	got, _ := capturedBody["reasonRequested"].(string)
+	if got == rawReason {
+		t.Error("server received raw reason — trimming did not happen")
+	}
+	if got != "사유 본문" {
+		t.Errorf("server received %q; expected trimmed %q", got, "사유 본문")
+	}
+}
+
 func TestQuotaRequest_ReasonRuneCount(t *testing.T) {
 	// Verify rune-based length: 500 Korean characters (each 3 bytes UTF-8)
 	// must pass; 501 must fail. Guards against accidental len() byte counting.
@@ -351,6 +387,34 @@ func TestQuotaListRequests_Success(t *testing.T) {
 	}
 }
 
+func TestQuotaListRequests_MultilineReasonRendersOnSingleRow(t *testing.T) {
+	// End-to-end guard: a server response containing newlines in
+	// reasonRequested must render as one terminal line per row, even if the
+	// truncateReason call site is later refactored away.
+	stdout, _ := setupQuotaTest(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"increaseQuotaList":[{"handleKey":"QTML","status":"APPROVED","requestedQuota":1000,"reasonRequested":"대상: 회원\n내용: 세일\n사유: 캠페인","dateCreated":"2026-05-06T10:00:00.000Z"}],"nextKey":""}`)
+	})
+
+	rootCmd.SetArgs([]string{"quota", "list-requests"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := stdout.String()
+	dataRows := 0
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(line, "QTML") {
+			dataRows++
+		}
+	}
+	if dataRows != 1 {
+		t.Errorf("expected exactly one data row containing QTML, got %d:\n%s", dataRows, out)
+	}
+	if !strings.Contains(out, "대상: 회원 내용: 세일 사유: 캠페인") {
+		t.Errorf("expected newlines collapsed to single spaces in rendered row:\n%s", out)
+	}
+}
+
 func TestQuotaListRequests_StatusFilter(t *testing.T) {
 	var gotQuery string
 	setupQuotaTest(t, func(w http.ResponseWriter, r *http.Request) {
@@ -425,38 +489,48 @@ func TestQuotaListRequests_JSON(t *testing.T) {
 
 func TestValidateQuotaRequest_Table(t *testing.T) {
 	tests := []struct {
-		name    string
-		target  int
-		reason  string
-		wantErr string // substring; "" means no error
+		name       string
+		target     int
+		reason     string
+		wantErr    string // substring; "" means no error
+		wantReason string // expected normalized reason (only checked when wantErr == "")
 	}{
-		{"missing target", 0, "사유", "요청 한도"},
-		{"target below min", 49, "사유", "50"},
-		{"target at min", 50, "사유", ""},
-		{"target at max", 10_000_000, "사유", ""},
-		{"target above max", 10_000_001, "사유", "10,000,000"},
-		{"missing reason", 1000, "", "요청 사유"},
-		{"whitespace reason", 1000, "   \t\n  ", "요청 사유"},
-		{"reason at limit", 1000, strings.Repeat("a", 500), ""},
-		{"reason over limit ascii", 1000, strings.Repeat("a", 501), "500"},
-		{"reason at limit korean", 1000, strings.Repeat("가", 500), ""},
-		{"reason over limit korean", 1000, strings.Repeat("가", 501), "500"},
-		// Whitespace around a 500-rune body must not push it over the limit;
-		// length is measured against the trimmed value.
-		{"trimmed length within limit", 1000, "  " + strings.Repeat("a", 500) + "  ", ""},
-		{"trimmed length over limit", 1000, "  " + strings.Repeat("a", 501) + "  ", "500"},
+		{"missing target", 0, "사유", "요청 한도", ""},
+		{"target below min", 49, "사유", "50", ""},
+		{"target at min", 50, "사유", "", "사유"},
+		{"target at max", 10_000_000, "사유", "", "사유"},
+		{"target above max", 10_000_001, "사유", "10,000,000", ""},
+		{"missing reason", 1000, "", "요청 사유", ""},
+		{"whitespace reason", 1000, "   \t\n  ", "요청 사유", ""},
+		{"reason at limit", 1000, strings.Repeat("a", 500), "", strings.Repeat("a", 500)},
+		{"reason over limit ascii", 1000, strings.Repeat("a", 501), "500", ""},
+		{"reason at limit korean", 1000, strings.Repeat("가", 500), "", strings.Repeat("가", 500)},
+		{"reason over limit korean", 1000, strings.Repeat("가", 501), "500", ""},
+		// Whitespace around a 500-rune body must not push it over the limit:
+		// length is measured against the trimmed value, and the trimmed value
+		// is what gets returned for transmission.
+		{"trimmed length within limit", 1000, "  " + strings.Repeat("a", 500) + "  ", "", strings.Repeat("a", 500)},
+		{"trimmed length over limit", 1000, "  " + strings.Repeat("a", 501) + "  ", "500", ""},
+		{"trim returns clean value", 1000, "\t\n  사유 본문  \n\t", "", "사유 본문"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateQuotaRequest(tt.target, tt.reason)
+			got, err := validateQuotaRequest(tt.target, tt.reason)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Errorf("unexpected error: %v", err)
+					return
+				}
+				if got != tt.wantReason {
+					t.Errorf("normalized reason: got %q, want %q", got, tt.wantReason)
 				}
 				return
 			}
 			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				t.Fatalf("expected error containing %q, got nil (returned %q)", tt.wantErr, got)
+			}
+			if got != "" {
+				t.Errorf("on error path, normalized reason should be empty, got %q", got)
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
@@ -473,11 +547,22 @@ func TestTruncateReason(t *testing.T) {
 		want string
 	}{
 		{"empty", "", 30, "-"},
+		{"whitespace only", " \t\n ", 30, "-"},
 		{"short", "hello", 30, "hello"},
 		{"exact", strings.Repeat("a", 30), 30, strings.Repeat("a", 30)},
 		{"truncated ascii", strings.Repeat("a", 31), 30, strings.Repeat("a", 29) + "…"},
 		{"truncated korean", strings.Repeat("가", 31), 30, strings.Repeat("가", 29) + "…"},
 		{"max one", "abc", 1, "…"},
+		{"max zero", "abc", 0, "…"},
+		// Multi-line reasons must be flattened to a single line so FormatTable
+		// does not split one row across multiple terminal lines.
+		{"multiline collapsed", "대상: 회원\n내용: 세일\n사유: 캠페인", 30, "대상: 회원 내용: 세일 사유: 캠페인"},
+		{"tabs and crlf", "a\tb\r\n  c", 30, "a b c"},
+		{"trims surrounding whitespace", "  hi  ", 30, "hi"},
+		// Length is measured *after* whitespace collapse: 30 ASCII tokens
+		// separated by spaces collapse to "a a a..." which is exactly 59 runes.
+		// Confirms post-collapse length is what's checked, not pre-collapse.
+		{"post-collapse length checked", strings.Repeat("a  ", 30), 30, strings.Repeat("a ", 14) + "a…"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -498,7 +583,17 @@ func FuzzValidateQuotaRequest(f *testing.F) {
 	f.Add(-int(^uint(0)>>1)-1, "") // MinInt
 
 	f.Fuzz(func(t *testing.T, target int, reason string) {
-		// Must not panic; must return either nil or a non-nil error.
-		_ = validateQuotaRequest(target, reason)
+		got, err := validateQuotaRequest(target, reason)
+		if err != nil && got != "" {
+			t.Errorf("error path must return empty reason, got %q", got)
+		}
+		if err == nil {
+			if got == "" {
+				t.Error("success path must return non-empty normalized reason")
+			}
+			if strings.TrimSpace(got) != got {
+				t.Errorf("normalized reason should have no leading/trailing whitespace: %q", got)
+			}
+		}
 	})
 }
