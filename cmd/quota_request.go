@@ -62,9 +62,9 @@ func init() {
 	quotaCmd.AddCommand(quotaRequestCmd)
 }
 
-// Returns the normalized reason that should be sent to the server: validation
-// is done on the trimmed value, and the same trimmed value must be transmitted
-// so the server-side length check sees what the client checked.
+// Returns the trimmed reason. Length validation runs on the trimmed value,
+// so the trimmed value must also be what we transmit — otherwise the client
+// and the recipient disagree on the boundary.
 func validateQuotaRequest(target int, reason string) (string, error) {
 	if target == 0 {
 		return "", fmt.Errorf("요청 한도(--target)를 입력하세요")

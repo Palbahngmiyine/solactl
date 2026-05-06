@@ -272,13 +272,20 @@ func TestQuotaRequest_ReasonTooLong(t *testing.T) {
 }
 
 func TestQuotaRequest_TrimsReasonBeforeSending(t *testing.T) {
-	// Regression: validation runs on trimmed reason, so the same trimmed value
-	// must be transmitted. Otherwise a 500-rune reason with surrounding
-	// whitespace passes the client check and is then rejected server-side.
+	// Validation runs on the trimmed reason, so the same trimmed value must be
+	// transmitted — otherwise a 500-rune reason with surrounding whitespace
+	// passes the client check and is rejected server-side.
 	var capturedBody map[string]any
 	setupQuotaTest(t, func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &capturedBody)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		if err := json.Unmarshal(raw, &capturedBody); err != nil {
+			t.Errorf("unmarshal body %q: %v", raw, err)
+			return
+		}
 		_, _ = io.WriteString(w, `{"handleKey":"QT","status":"PENDING","requestedQuota":1000}`)
 	})
 
@@ -292,8 +299,11 @@ func TestQuotaRequest_TrimsReasonBeforeSending(t *testing.T) {
 		t.Fatal("server did not receive body")
 	}
 	got, _ := capturedBody["reasonRequested"].(string)
+	if got == rawReason {
+		t.Error("server received raw reason — trimming did not happen")
+	}
 	if got != "사유 본문" {
-		t.Errorf("server received raw reason %q; expected trimmed %q", got, "사유 본문")
+		t.Errorf("server received %q; expected trimmed %q", got, "사유 본문")
 	}
 }
 
@@ -374,6 +384,34 @@ func TestQuotaListRequests_Success(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestQuotaListRequests_MultilineReasonRendersOnSingleRow(t *testing.T) {
+	// End-to-end guard: a server response containing newlines in
+	// reasonRequested must render as one terminal line per row, even if the
+	// truncateReason call site is later refactored away.
+	stdout, _ := setupQuotaTest(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"increaseQuotaList":[{"handleKey":"QTML","status":"APPROVED","requestedQuota":1000,"reasonRequested":"대상: 회원\n내용: 세일\n사유: 캠페인","dateCreated":"2026-05-06T10:00:00.000Z"}],"nextKey":""}`)
+	})
+
+	rootCmd.SetArgs([]string{"quota", "list-requests"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := stdout.String()
+	dataRows := 0
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(line, "QTML") {
+			dataRows++
+		}
+	}
+	if dataRows != 1 {
+		t.Errorf("expected exactly one data row containing QTML, got %d:\n%s", dataRows, out)
+	}
+	if !strings.Contains(out, "대상: 회원 내용: 세일 사유: 캠페인") {
+		t.Errorf("expected newlines collapsed to single spaces in rendered row:\n%s", out)
 	}
 }
 
@@ -468,7 +506,7 @@ func TestValidateQuotaRequest_Table(t *testing.T) {
 		{"reason over limit ascii", 1000, strings.Repeat("a", 501), "500", ""},
 		{"reason at limit korean", 1000, strings.Repeat("가", 500), "", strings.Repeat("가", 500)},
 		{"reason over limit korean", 1000, strings.Repeat("가", 501), "500", ""},
-		// Whitespace around a 500-rune body must not push it over the limit;
+		// Whitespace around a 500-rune body must not push it over the limit:
 		// length is measured against the trimmed value, and the trimmed value
 		// is what gets returned for transmission.
 		{"trimmed length within limit", 1000, "  " + strings.Repeat("a", 500) + "  ", "", strings.Repeat("a", 500)},
@@ -515,11 +553,16 @@ func TestTruncateReason(t *testing.T) {
 		{"truncated ascii", strings.Repeat("a", 31), 30, strings.Repeat("a", 29) + "…"},
 		{"truncated korean", strings.Repeat("가", 31), 30, strings.Repeat("가", 29) + "…"},
 		{"max one", "abc", 1, "…"},
-		// Regression: multi-line reasons must be flattened to a single line so
-		// FormatTable does not split one row across multiple terminal lines.
+		{"max zero", "abc", 0, "…"},
+		// Multi-line reasons must be flattened to a single line so FormatTable
+		// does not split one row across multiple terminal lines.
 		{"multiline collapsed", "대상: 회원\n내용: 세일\n사유: 캠페인", 30, "대상: 회원 내용: 세일 사유: 캠페인"},
 		{"tabs and crlf", "a\tb\r\n  c", 30, "a b c"},
 		{"trims surrounding whitespace", "  hi  ", 30, "hi"},
+		// Length is measured *after* whitespace collapse: 30 ASCII tokens
+		// separated by spaces collapse to "a a a..." which is exactly 59 runes.
+		// Confirms post-collapse length is what's checked, not pre-collapse.
+		{"post-collapse length checked", strings.Repeat("a  ", 30), 30, strings.Repeat("a ", 14) + "a…"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
