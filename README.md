@@ -56,7 +56,67 @@ solactl messages list
 
 # 잔액 조회
 solactl balance
+
+# 발송 한도 조회 / 증가 요청
+solactl quota get
+solactl quota request --target 5000 --reason "..."
+solactl quota list-requests
 ```
 
 자세한 사용법은 `solactl --help` 또는 각 서브커맨드의 `--help`를 참조하세요.
+
+## 발송 한도 요청
+
+`solactl quota request` 로 발송 한도 증가를 요청할 수 있습니다. 요청은 SOLAPI 운영팀의 검토를 거쳐 승인 또는 반려됩니다.
+
+### 승인을 빠르게 받는 팁
+
+> **요청 사유에 실제 발송할 메시지 본문을 그대로 적으세요.** 검토자가 발송 의도와 컨텍스트를 즉시 확인할 수 있어 승인이 가장 빨라집니다.
+
+`--reason` 에 다음 정보를 가능한 한 구체적으로 포함하세요.
+
+- [ ] **수신자** — 누구에게 보내는지, 수신 동의를 어떻게 확보했는지
+- [ ] **메시지 본문** — 실제로 발송할 내용 전문 또는 핵심 예시 (광고성 메시지면 광고 표기 포함 여부)
+- [ ] **발송 일정 / 규모** — 캠페인 일자, 1일 / 1회 예상 발송 건수
+- [ ] **비즈니스 사유** — 한도 증액이 필요한 이유 (이벤트, 정기 알림 등)
+
+### 예시
+
+<details>
+<summary>잘 작성된 사유 (승인 빠름)</summary>
+
+```bash
+solactl quota request --target 5000 --reason "$(cat <<EOF
+대상: 자사몰 회원 4,800명 (가입 시 마케팅 수신 동의 보유)
+내용: '[OO몰] 5월 단독 세일 안내. 회원 한정 30% 쿠폰: <링크>'
+발송 시점: 2026-05-15 14:00 일회성, 약 4,800건
+사유: 정기 캠페인 발송으로 일일 한도 초과 예상
+EOF
+)"
+```
+
+</details>
+
+<details>
+<summary>부족한 사유 (반려되거나 추가 확인 필요)</summary>
+
+```bash
+solactl quota request --target 5000 --reason "이벤트 발송"
+```
+
+→ 수신자 / 메시지 본문 / 발송 시점이 모두 누락되어 검토자가 판단하기 어렵습니다.
+
+</details>
+
+### 검토 / 추적
+
+```bash
+solactl quota get                              # 현재 한도 확인
+solactl quota list-requests                    # 모든 요청 이력
+solactl quota list-requests --status PENDING   # 검토 대기 중인 요청만
+```
+
+상태값은 `PENDING` (검토 대기) → `APPROVED` (승인) 또는 `REJECTED` (반려) 로 변경됩니다.
+
+> **주의** — 동일 계정에 PENDING 요청이 이미 있을 때 새 요청을 제출하면 이전 요청은 자동으로 REJECTED 처리됩니다.
 
