@@ -1,5 +1,12 @@
 package types
 
+// Quota request status values returned by /quota/v1/me/system.
+const (
+	QuotaStatusPending  = "PENDING"
+	QuotaStatusApproved = "APPROVED"
+	QuotaStatusRejected = "REJECTED"
+)
+
 // QuotaInfo represents the current sending quota for the authenticated account.
 // Mirrors GET /quota/v1/me response.
 type QuotaInfo struct {

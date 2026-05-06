@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/solapi/solactl/pkg/types"
+	"github.com/solapi/solactl/pkg/validation"
 )
 
 const quotaReasonColumnMax = 30
@@ -34,7 +35,7 @@ var quotaListRequestsCmd = &cobra.Command{
 }
 
 func init() {
-	quotaListRequestsCmd.Flags().StringVar(&quotaListRequestsFlagStatus, "status", "", "상태 필터 (PENDING/APPROVED/REJECTED)")
+	quotaListRequestsCmd.Flags().StringVar(&quotaListRequestsFlagStatus, "status", "", fmt.Sprintf("상태 필터 (%s/%s/%s)", types.QuotaStatusPending, types.QuotaStatusApproved, types.QuotaStatusRejected))
 	quotaListRequestsCmd.Flags().StringVar(&quotaListRequestsFlagStartKey, "start-key", "", "페이지네이션 시작 키")
 	quotaListRequestsCmd.Flags().IntVar(&quotaListRequestsFlagLimit, "limit", 20, "조회 건수")
 	quotaCmd.AddCommand(quotaListRequestsCmd)
@@ -91,19 +92,16 @@ func runQuotaListRequests(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-// truncateReason shortens a reason string to maxRunes characters,
-// appending an ellipsis when truncated. Empty input returns "-" so
-// the column is not blank.
+// Empty input returns "-" so the table column is not blank.
 func truncateReason(s string, maxRunes int) string {
 	if s == "" {
 		return "-"
 	}
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
+	if validation.GetRealTextLength(s) <= maxRunes {
 		return s
 	}
 	if maxRunes <= 1 {
 		return "…"
 	}
-	return string(runes[:maxRunes-1]) + "…"
+	return string([]rune(s)[:maxRunes-1]) + "…"
 }

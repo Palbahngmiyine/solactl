@@ -22,8 +22,6 @@ func resetQuotaFlags() {
 	quotaListRequestsFlagLimit = 20
 }
 
-// setupQuotaTest mirrors setupBalanceTest: stands up an httptest server,
-// installs the test client, captures stdout and stderr.
 func setupQuotaTest(t *testing.T, handler http.HandlerFunc) (stdout, stderr *bytes.Buffer) {
 	t.Helper()
 	resetQuotaFlags()
@@ -443,6 +441,10 @@ func TestValidateQuotaRequest_Table(t *testing.T) {
 		{"reason over limit ascii", 1000, strings.Repeat("a", 501), "500"},
 		{"reason at limit korean", 1000, strings.Repeat("가", 500), ""},
 		{"reason over limit korean", 1000, strings.Repeat("가", 501), "500"},
+		// Whitespace around a 500-rune body must not push it over the limit;
+		// length is measured against the trimmed value.
+		{"trimmed length within limit", 1000, "  " + strings.Repeat("a", 500) + "  ", ""},
+		{"trimmed length over limit", 1000, "  " + strings.Repeat("a", 501) + "  ", "500"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

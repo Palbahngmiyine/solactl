@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
 	"github.com/solapi/solactl/pkg/types"
+	"github.com/solapi/solactl/pkg/validation"
 )
 
 const (
@@ -62,9 +62,6 @@ func init() {
 	quotaCmd.AddCommand(quotaRequestCmd)
 }
 
-// validateQuotaRequest validates --target / --reason flag values.
-// Extracted so it can be exercised by fuzz / unit tests independently of
-// the cobra wiring.
 func validateQuotaRequest(target int, reason string) error {
 	if target == 0 {
 		return fmt.Errorf("요청 한도(--target)를 입력하세요")
@@ -76,7 +73,7 @@ func validateQuotaRequest(target int, reason string) error {
 	if trimmed == "" {
 		return fmt.Errorf("요청 사유(--reason)를 입력하세요")
 	}
-	if utf8.RuneCountInString(reason) > quotaReasonMax {
+	if validation.GetRealTextLength(trimmed) > quotaReasonMax {
 		return fmt.Errorf("요청 사유는 %d자 이하여야 합니다", quotaReasonMax)
 	}
 	return nil
@@ -114,7 +111,7 @@ func runQuotaRequest(_ *cobra.Command, _ []string) error {
 
 	_, _ = fmt.Fprintln(out(), "발송 한도 증가 요청이 접수되었습니다.")
 	p.PrintKeyValue(
-		"요청 ID", types.DisplayStatus(resp.HandleKey),
+		"요청 ID", resp.HandleKey,
 		"요청 한도", formatNumber(resp.RequestedQuota),
 		"상태", types.DisplayStatus(resp.Status),
 	)
