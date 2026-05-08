@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -199,6 +200,22 @@ func TestCRM_DynamicGetRecord_PathParamEncoded(t *testing.T) {
 	// `/` in arg must be percent-encoded to keep the path structure intact.
 	if !strings.Contains(sawRequestURI, "abc%2Fdef") {
 		t.Errorf("path arg not encoded: %s", sawRequestURI)
+	}
+}
+
+func TestCRM_EncodePathArgMatchesURLPathEscape(t *testing.T) {
+	tests := []string{
+		"abc/def",
+		"abc?def#ghi",
+		"space value",
+		"홍길동",
+	}
+	for _, tc := range tests {
+		t.Run(tc, func(t *testing.T) {
+			if got, want := encodePathArg(tc), url.PathEscape(tc); got != want {
+				t.Fatalf("encodePathArg(%q) = %q, want %q", tc, got, want)
+			}
+		})
 	}
 }
 

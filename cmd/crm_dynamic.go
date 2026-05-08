@@ -207,28 +207,8 @@ func dispatch(ctx context.Context, c *client.Client, method, path string, q url.
 	return nil, fmt.Errorf("지원하지 않는 HTTP 메서드: %s", method)
 }
 
-// encodePathArg matches JS `encodeURIComponent` semantics so path arguments
-// containing `/` cannot break out of their segment. url.PathEscape is not a
-// substitute — it leaves `/` un-encoded.
 func encodePathArg(s string) string {
-	const hex = "0123456789ABCDEF"
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := range len(s) {
-		c := s[i]
-		switch {
-		case c >= 'A' && c <= 'Z',
-			c >= 'a' && c <= 'z',
-			c >= '0' && c <= '9',
-			c == '-', c == '_', c == '.', c == '~':
-			b.WriteByte(c)
-		default:
-			b.WriteByte('%')
-			b.WriteByte(hex[c>>4])
-			b.WriteByte(hex[c&0x0F])
-		}
-	}
-	return b.String()
+	return url.PathEscape(s)
 }
 
 func withQuery(path string, q url.Values) string {
