@@ -5,6 +5,12 @@
 // node CLI. See docs/crm-cli-spec.md.
 package spec
 
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
 // OpenApiSpec is the minimal subset of OpenAPI 3.x that the CRM CLI consumes.
 // Fields not used by mapper/loader are kept as raw maps so backend additions
 // do not break decoding.
@@ -22,9 +28,75 @@ type SpecInfo struct {
 }
 
 // PathItem holds operations keyed by lowercase HTTP method (get/post/...).
-// Non-operation keys (e.g. "parameters", "summary") are tolerated by the
-// mapper which checks each value for the OperationObject shape.
+// Non-operation keys are ignored while path-level parameters are merged into
+// each operation so standard OpenAPI PathItem objects decode successfully.
 type PathItem map[string]OperationObject
+
+var supportedPathItemMethods = map[string]struct{}{
+	"delete": {},
+	"get":    {},
+	"patch":  {},
+	"post":   {},
+	"put":    {},
+}
+
+// UnmarshalJSON accepts full OpenAPI PathItem objects. In particular,
+// `parameters` is an array at the path level, not an operation, so decoding a
+// PathItem as map[string]OperationObject directly would reject valid specs.
+func (p *PathItem) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	var commonParams []ParameterObject
+	if paramsRaw, ok := raw["parameters"]; ok {
+		if err := json.Unmarshal(paramsRaw, &commonParams); err != nil {
+			return fmt.Errorf("path-level parameters 파싱 실패: %w", err)
+		}
+	}
+
+	item := make(PathItem)
+	for key, value := range raw {
+		method := strings.ToLower(key)
+		if _, ok := supportedPathItemMethods[method]; !ok {
+			continue
+		}
+		var op OperationObject
+		if err := json.Unmarshal(value, &op); err != nil {
+			return fmt.Errorf("%s operation 파싱 실패: %w", key, err)
+		}
+		op.Parameters = mergePathItemParameters(commonParams, op.Parameters)
+		item[method] = op
+	}
+
+	*p = item
+	return nil
+}
+
+func mergePathItemParameters(common, operation []ParameterObject) []ParameterObject {
+	if len(common) == 0 {
+		return operation
+	}
+	if len(operation) == 0 {
+		return append([]ParameterObject(nil), common...)
+	}
+
+	overridden := make(map[string]struct{}, len(operation))
+	for _, param := range operation {
+		overridden[param.In+"\x00"+param.Name] = struct{}{}
+	}
+
+	merged := make([]ParameterObject, 0, len(common)+len(operation))
+	for _, param := range common {
+		if _, ok := overridden[param.In+"\x00"+param.Name]; ok {
+			continue
+		}
+		merged = append(merged, param)
+	}
+	merged = append(merged, operation...)
+	return merged
+}
 
 // OperationObject is one HTTP method on a path.
 type OperationObject struct {

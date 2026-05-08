@@ -21,20 +21,17 @@ import (
 // leaves it nil; the loader uses the upstream URL.
 var crmLoaderOverride *spec.Loader
 
-// RegisterDynamicCRM resolves credentials and the OpenAPI spec, then mounts
-// dynamic resource subcommands under `solactl crm`. Failures here must NEVER
-// block the rest of the CLI:
+// RegisterDynamicCRM resolves the OpenAPI spec, then mounts dynamic resource
+// subcommands under `solactl crm`. Failures here must NEVER block the rest of
+// the CLI:
 //
-//   - missing credentials → skip dynamic registration entirely
 //   - OpenAPI fetch failure with no cache → skip + stderr warning
 //   - OpenAPI fetch failure with stale cache → register from stale + warning
+//
+// Credentials are intentionally not loaded here: this runs before cobra parses
+// persistent flags, so `--profile`, `--api-key`, and `--api-secret` are only
+// reliable during command execution in newClient().
 func RegisterDynamicCRM(ctx context.Context) {
-	if _, err := loadConfig(); err != nil {
-		// No credentials → static `crm config clear-cache` is still mounted,
-		// but we don't expose dynamic commands. This matches solcrm.
-		return
-	}
-
 	loader := crmLoaderOverride
 	if loader == nil {
 		loader = &spec.Loader{

@@ -7,7 +7,7 @@ import (
 // crmCmd is the parent for all CRM (`crm-core`) operations. The static
 // children (`config clear-cache`, `mcp`) are registered eagerly; resource
 // trees (`<resource> <action>`) are added dynamically by RegisterDynamicCRM
-// at startup, after credentials and the OpenAPI spec have been resolved.
+// at startup, after the OpenAPI spec has been resolved.
 //
 // The implementation mirrors @solapi/crm-cli (sdk/cli) — see
 // docs/crm-cli-spec.md for the full design rationale.

@@ -334,7 +334,7 @@ func TestCRM_ConfigClearCache(t *testing.T) {
 	}
 }
 
-func TestCRM_NoCredentialsSkipsRegistration(t *testing.T) {
+func TestCRM_RegisterDynamicWithoutCredentials(t *testing.T) {
 	resetFlags()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv(spec.CacheDirEnv, t.TempDir())
@@ -342,14 +342,27 @@ func TestCRM_NoCredentialsSkipsRegistration(t *testing.T) {
 	t.Setenv("SOLACTL_API_SECRET", "")
 
 	resetCRMRegistration()
-	t.Cleanup(func() { resetCRMRegistration(); resetFlags() })
+	specSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, fakeSpec)
+	}))
+	t.Cleanup(specSrv.Close)
+	crmLoaderOverride = &spec.Loader{URL: specSrv.URL}
+	t.Cleanup(func() {
+		crmLoaderOverride = nil
+		resetCRMRegistration()
+		resetFlags()
+	})
 
 	RegisterDynamicCRM(context.Background())
 
+	var foundRecords bool
 	for _, c := range crmCmd.Commands() {
-		if c.Use != "config" && !strings.HasPrefix(c.Use, "config ") {
-			t.Errorf("unexpected dynamic command without auth: %q", c.Use)
+		if c.Use == "records" {
+			foundRecords = true
 		}
+	}
+	if !foundRecords {
+		t.Fatal("dynamic CRM commands should register before credentials are parsed")
 	}
 }
 
