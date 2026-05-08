@@ -120,7 +120,7 @@ func newCRMUploadCommandWithAuth(use, short, path string, pathParams []string, c
 			if err != nil {
 				return err
 			}
-			if req.query != nil && len(req.query) > 0 {
+			if len(req.query) > 0 {
 				req.path = withQuery(req.path, req.query)
 			}
 
