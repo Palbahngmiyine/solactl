@@ -13,6 +13,7 @@ const (
 	CategoryUnknown    Category = iota
 	CategoryNetwork             // connection refused, DNS, timeout
 	CategoryAuth                // 401, 403
+	CategoryPlan                // plan feature/quota restriction
 	CategoryValidation          // 400
 	CategoryNotFound            // 404
 	CategoryRateLimit           // 429
@@ -71,6 +72,16 @@ func classifyAPI(e *APIError) *ClassifiedError {
 	ce := &ClassifiedError{Original: e}
 
 	switch {
+	case strings.EqualFold(e.ErrorCode, "PlanQuotaExceeded"):
+		ce.Category = CategoryPlan
+		ce.Message = "CRM 플랜 한도를 초과했습니다"
+		ce.Hint = firstNonEmpty(e.ErrorMessage, "현재 플랜의 사용량 또는 한도를 확인하세요")
+
+	case strings.EqualFold(e.ErrorCode, "PlanFeatureDisabled"):
+		ce.Category = CategoryPlan
+		ce.Message = "현재 CRM 플랜에서 사용할 수 없는 기능입니다"
+		ce.Hint = firstNonEmpty(e.ErrorMessage, "필요한 기능이 포함된 플랜인지 확인하세요")
+
 	case e.HTTPStatus == 401 || strings.EqualFold(e.ErrorCode, "Unauthorized"):
 		ce.Category = CategoryAuth
 		ce.Message = "인증에 실패했습니다"
@@ -112,6 +123,15 @@ func classifyAPI(e *APIError) *ClassifiedError {
 	}
 
 	return ce
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func classifyGeneric(err error) *ClassifiedError {

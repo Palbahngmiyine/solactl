@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -47,25 +48,40 @@ func RegisterDynamicCRM(ctx context.Context) {
 
 	commands := spec.MapSpec(apiSpec)
 	for _, resource := range spec.Resources(commands) {
-		resourceCmd := &cobra.Command{
-			Use:   resource,
-			Short: fmt.Sprintf("%s 리소스 관리", resource),
-		}
+		resourceCmd, _ := ensureCRMResourceCommand(resource, fmt.Sprintf("%s 리소스 관리", resource))
+		markDynamicCRMResourceCommand(resourceCmd)
 		for _, mc := range spec.CommandsForResource(commands, resource) {
-			resourceCmd.AddCommand(buildDynamicSubcommand(mc))
+			resourceCmd.AddCommand(markDynamicCRMCommand(buildDynamicSubcommand(mc)))
 		}
-		crmCmd.AddCommand(resourceCmd)
 	}
 }
 
 // dynamicFlags holds per-command flag storage. cobra writes flag values into
 // these slots during parse; the RunE closure reads them afterwards.
 type dynamicFlags struct {
-	query    map[string]*string
+	query    map[string]*dynamicQueryFlag
 	data     string
 	dataFile string
 	format   string
 }
+
+type dynamicQueryFlag struct {
+	name   string
+	kind   queryFlagKind
+	string string
+	bool   bool
+	int    int
+	number float64
+}
+
+type queryFlagKind int
+
+const (
+	queryFlagString queryFlagKind = iota
+	queryFlagBool
+	queryFlagInt
+	queryFlagNumber
+)
 
 func buildDynamicSubcommand(mc spec.MappedCommand) *cobra.Command {
 	var useBuilder strings.Builder
@@ -87,15 +103,15 @@ func buildDynamicSubcommand(mc spec.MappedCommand) *cobra.Command {
 		Args:  cobra.ExactArgs(len(mc.PathParams)),
 	}
 
-	flags := &dynamicFlags{query: make(map[string]*string, len(mc.QueryParams))}
+	flags := &dynamicFlags{query: make(map[string]*dynamicQueryFlag, len(mc.QueryParams))}
 	for _, q := range mc.QueryParams {
-		v := new(string)
-		flags.query[q.Name] = v
 		desc := q.Description
 		if desc == "" {
 			desc = q.Name
 		}
-		sub.Flags().StringVar(v, q.Name, "", desc)
+		qf := newDynamicQueryFlag(q)
+		flags.query[q.Name] = qf
+		qf.register(sub, desc)
 		if q.Required {
 			_ = sub.MarkFlagRequired(q.Name)
 		}
@@ -106,13 +122,55 @@ func buildDynamicSubcommand(mc spec.MappedCommand) *cobra.Command {
 	}
 	sub.Flags().StringVar(&flags.format, "format", "", "출력 형식 (json/table/csv, 기본 table; --json이 켜져 있으면 json)")
 
-	sub.RunE = func(_ *cobra.Command, args []string) error {
-		return runDynamicCommand(mc, args, flags)
+	sub.RunE = func(cmd *cobra.Command, args []string) error {
+		return runDynamicCommand(cmd, mc, args, flags)
 	}
 	return sub
 }
 
-func runDynamicCommand(mc spec.MappedCommand, args []string, flags *dynamicFlags) error {
+func newDynamicQueryFlag(param spec.ParameterObject) *dynamicQueryFlag {
+	qf := &dynamicQueryFlag{name: param.Name, kind: queryFlagString}
+	if param.Schema == nil {
+		return qf
+	}
+	switch strings.ToLower(param.Schema.Type) {
+	case "boolean":
+		qf.kind = queryFlagBool
+	case "integer":
+		qf.kind = queryFlagInt
+	case "number":
+		qf.kind = queryFlagNumber
+	}
+	return qf
+}
+
+func (qf *dynamicQueryFlag) register(cmd *cobra.Command, desc string) {
+	switch qf.kind {
+	case queryFlagBool:
+		cmd.Flags().BoolVar(&qf.bool, qf.name, false, desc)
+	case queryFlagInt:
+		cmd.Flags().IntVar(&qf.int, qf.name, 0, desc)
+	case queryFlagNumber:
+		cmd.Flags().Float64Var(&qf.number, qf.name, 0, desc)
+	default:
+		cmd.Flags().StringVar(&qf.string, qf.name, "", desc)
+	}
+}
+
+func (qf *dynamicQueryFlag) value() string {
+	switch qf.kind {
+	case queryFlagBool:
+		return strconv.FormatBool(qf.bool)
+	case queryFlagInt:
+		return strconv.Itoa(qf.int)
+	case queryFlagNumber:
+		return strconv.FormatFloat(qf.number, 'f', -1, 64)
+	default:
+		return qf.string
+	}
+}
+
+func runDynamicCommand(cmd *cobra.Command, mc spec.MappedCommand, args []string, flags *dynamicFlags) error {
 	format, err := output.NormalizeFormat(flags.format)
 	if err != nil {
 		return err
@@ -131,8 +189,8 @@ func runDynamicCommand(mc spec.MappedCommand, args []string, flags *dynamicFlags
 
 	q := url.Values{}
 	for _, p := range mc.QueryParams {
-		if v := flags.query[p.Name]; v != nil && *v != "" {
-			q.Set(p.Name, *v)
+		if v := flags.query[p.Name]; v != nil && cmd.Flags().Changed(p.Name) {
+			q.Set(p.Name, v.value())
 		}
 	}
 

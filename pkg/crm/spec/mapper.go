@@ -50,6 +50,9 @@ func MapSpec(spec *OpenApiSpec) []MappedCommand {
 			if !isOperation(op) {
 				continue
 			}
+			if isExcludedOperation(method, p) {
+				continue
+			}
 			action := deriveAction(method, segments, op)
 
 			pathParams := make([]ParameterObject, 0, len(op.Parameters))
@@ -80,6 +83,37 @@ func MapSpec(spec *OpenApiSpec) []MappedCommand {
 
 	dedupeActions(commands)
 	return commands
+}
+
+var excludedOperations = map[string]struct{}{
+	"post /crm-core/v1/agent/files":                                                      {},
+	"post /crm-core/v1/contents/{contentId}/images":                                      {},
+	"post /crm-core/v1/document-templates/{templateId}/versions/{versionId}/attachments": {},
+	"post /crm-core/v1/documents/{documentId}/attachments":                               {},
+	"post /crm-core/v1/forms/{formId}/images":                                            {},
+	"post /crm-core/v1/message-templates/{messageTemplateId}/image":                      {},
+	"post /crm-core/v1/records/import/excel":                                             {},
+	"post /crm-core/v1/records/import/excel/extract-columns":                             {},
+	"post /crm-core/v1/records/import/excel/preview":                                     {},
+	"post /crm-core/v1/records/{recordId}/attachments":                                   {},
+	"post /crm-core/v1/records/{recordId}/images":                                        {},
+	"post /crm-core/v1/records/{recordId}/profile-image":                                 {},
+	"post /crm-core/v1/sdk/forms/{publicToken}/upload":                                   {},
+
+	"delete /crm-core/v1/plans/me/scheduled-change": {},
+	"post /crm-core/v1/plans/me/cancel":             {},
+	"post /crm-core/v1/plans/me/downgrade":          {},
+	"post /crm-core/v1/plans/me/retry-payment":      {},
+	"post /crm-core/v1/plans/me/subscribe":          {},
+	"post /crm-core/v1/plans/me/upgrade":            {},
+	"put /crm-core/v1/plans/me":                     {},
+	"put /crm-core/v1/plans/me/overage-settings":    {},
+	"put /crm-core/v1/plans/me/trial/underlying":    {},
+}
+
+func isExcludedOperation(method, path string) bool {
+	_, ok := excludedOperations[strings.ToLower(method)+" "+path]
+	return ok
 }
 
 // isOperation distinguishes a real OpenAPI operation entry from a zero-valued

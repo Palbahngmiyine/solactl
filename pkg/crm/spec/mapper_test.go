@@ -56,6 +56,21 @@ func TestMapSpec_SkipsNonPrefixPaths(t *testing.T) {
 	}
 }
 
+func TestMapSpec_SkipsStaticUploadAndPlanChangeOperations(t *testing.T) {
+	spec := &OpenApiSpec{Paths: map[string]PathItem{
+		"/crm-core/v1/records/import/excel": {"post": OperationObject{Summary: "excel upload"}},
+		"/crm-core/v1/plans/me/upgrade":     {"post": OperationObject{Summary: "upgrade"}},
+		"/crm-core/v1/records":              {"get": OperationObject{Summary: "list"}},
+	}}
+	cmds := MapSpec(spec)
+	if len(cmds) != 1 {
+		t.Fatalf("want only the safe JSON/list command, got %#v", cmds)
+	}
+	if cmds[0].Resource != "records" || cmds[0].Action != "list" {
+		t.Fatalf("unexpected remaining command: %#v", cmds[0])
+	}
+}
+
 func TestMapSpec_DuplicateActionsDisambiguated(t *testing.T) {
 	spec := &OpenApiSpec{Paths: map[string]PathItem{
 		"/crm-core/v1/records":              {"get": OperationObject{Summary: "list"}},

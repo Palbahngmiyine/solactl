@@ -31,6 +31,20 @@ func TestClassify_APIErrors(t *testing.T) {
 			wantHint:     "API 키의 권한을 확인하세요",
 		},
 		{
+			name:         "plan quota exceeded",
+			err:          &APIError{HTTPStatus: 403, ErrorCode: "PlanQuotaExceeded", ErrorMessage: "현재 사용량: 저장소 10/10. 권장 플랜: PROFESSIONAL"},
+			wantCategory: CategoryPlan,
+			wantMessage:  "CRM 플랜 한도를 초과했습니다",
+			wantHint:     "현재 사용량: 저장소 10/10. 권장 플랜: PROFESSIONAL",
+		},
+		{
+			name:         "plan feature disabled",
+			err:          &APIError{HTTPStatus: 403, ErrorCode: "PlanFeatureDisabled", ErrorMessage: "제한 기능: Excel 가져오기. 사용 가능한 플랜: STARTER"},
+			wantCategory: CategoryPlan,
+			wantMessage:  "현재 CRM 플랜에서 사용할 수 없는 기능입니다",
+			wantHint:     "제한 기능: Excel 가져오기. 사용 가능한 플랜: STARTER",
+		},
+		{
 			name:         "404 not found",
 			err:          &APIError{HTTPStatus: 404, ErrorCode: "NotFound", ErrorMessage: "not found"},
 			wantCategory: CategoryNotFound,

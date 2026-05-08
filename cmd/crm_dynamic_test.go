@@ -29,7 +29,11 @@ const fakeSpec = `{
         "summary": "list records",
         "parameters": [
           {"name": "entityId", "in": "query", "required": true},
-          {"name": "limit", "in": "query"}
+          {"name": "limit", "in": "query"},
+          {"name": "includeDeleted", "in": "query", "schema": {"type": "boolean"}},
+          {"name": "page", "in": "query", "schema": {"type": "integer"}},
+          {"name": "score", "in": "query", "schema": {"type": "number"}},
+          {"name": "keyword", "in": "query"}
         ]
       },
       "post": {
@@ -46,6 +50,14 @@ const fakeSpec = `{
       },
       "delete": {
         "summary": "delete record",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true}
+        ]
+      }
+    },
+    "/crm-core/v1/records/{id}/restore": {
+      "post": {
+        "summary": "restore record",
         "parameters": [
           {"name": "id", "in": "path", "required": true}
         ]
@@ -109,10 +121,17 @@ func resetCRMRegistration() {
 	}
 	for _, c := range crmCmd.Commands() {
 		// Keep static children (`config`, `mcp` once added).
-		if c.Use == "config" || strings.HasPrefix(c.Use, "config ") || c.Use == "mcp" {
+		if c.Use == "config" || strings.HasPrefix(c.Use, "config ") || c.Use == "mcp" || c.Annotations[crmStaticResourceAnnotation] == "true" {
+			for _, child := range c.Commands() {
+				if child.Annotations[crmDynamicCommandAnnotation] == "true" {
+					c.RemoveCommand(child)
+				}
+			}
 			continue
 		}
-		crmCmd.RemoveCommand(c)
+		if c.Annotations[crmDynamicResourceAnnotation] == "true" {
+			crmCmd.RemoveCommand(c)
+		}
 	}
 }
 
@@ -124,6 +143,11 @@ func TestCRM_DynamicListRecords_TableFormat(t *testing.T) {
 		if got := r.URL.Query().Get("entityId"); got != "ENxxx" {
 			t.Errorf("entityId: got %q", got)
 		}
+		for _, name := range []string{"limit", "includeDeleted", "page", "score", "keyword"} {
+			if _, ok := r.URL.Query()[name]; ok {
+				t.Errorf("query %q should be omitted when its flag was not provided: %s", name, r.URL.RawQuery)
+			}
+		}
 		_, _ = io.WriteString(w, `[{"id":"R1","name":"홍길동"},{"id":"R2","name":"김철수"}]`)
 	})
 
@@ -134,6 +158,58 @@ func TestCRM_DynamicListRecords_TableFormat(t *testing.T) {
 	out := stdout.String()
 	if !strings.Contains(out, "R1") || !strings.Contains(out, "홍길동") {
 		t.Errorf("unexpected output:\n%s", out)
+	}
+}
+
+func TestCRM_DynamicListRecords_QueryFlagsPreserveExplicitBoundaryValues(t *testing.T) {
+	setupCRMTest(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		checks := map[string]string{
+			"entityId":       "ENxxx",
+			"limit":          "",
+			"includeDeleted": "false",
+			"page":           "0",
+			"score":          "0",
+			"keyword":        "",
+		}
+		for key, want := range checks {
+			values, ok := q[key]
+			if !ok {
+				t.Errorf("query %q missing from %s", key, r.URL.RawQuery)
+				continue
+			}
+			if len(values) != 1 || values[0] != want {
+				t.Errorf("query %q: got %#v, want %q", key, values, want)
+			}
+		}
+		_, _ = io.WriteString(w, `[{"id":"R1"}]`)
+	})
+
+	rootCmd.SetArgs([]string{
+		"crm", "records", "list",
+		"--entityId", "ENxxx",
+		"--limit", "",
+		"--includeDeleted=false",
+		"--page", "0",
+		"--score", "0",
+		"--keyword", "",
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+}
+
+func TestCRM_DynamicListRecords_BoolQueryFlagWithoutValueSendsTrue(t *testing.T) {
+	setupCRMTest(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("includeDeleted"); got != "true" {
+			t.Errorf("includeDeleted: got %q, want true (raw query %s)", got, r.URL.RawQuery)
+		}
+		_, _ = io.WriteString(w, `[{"id":"R1"}]`)
+	})
+
+	rootCmd.SetArgs([]string{"crm", "records", "list", "--entityId", "ENxxx", "--includeDeleted"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("err: %v", err)
 	}
 }
 
@@ -305,6 +381,34 @@ func TestCRM_DynamicDelete_NoBody(t *testing.T) {
 	}
 }
 
+func TestCRM_DynamicRestorePost_NoBody(t *testing.T) {
+	var sawMethod, sawContentType string
+	var sawBody []byte
+	setupCRMTest(t, func(w http.ResponseWriter, r *http.Request) {
+		sawMethod = r.Method
+		sawContentType = r.Header.Get("Content-Type")
+		var err error
+		sawBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"restored":true}`)
+	})
+	rootCmd.SetArgs([]string{"crm", "records", "restore", "REC1", "--format", "json"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if sawMethod != http.MethodPost {
+		t.Errorf("method: got %s", sawMethod)
+	}
+	if len(sawBody) != 0 {
+		t.Errorf("body: got %q, want empty", string(sawBody))
+	}
+	if sawContentType != "" {
+		t.Errorf("Content-Type: got %q, want empty when body is absent", sawContentType)
+	}
+}
+
 func TestCRM_DynamicListRecords_RequiredQueryEnforced(t *testing.T) {
 	setupCRMTest(t, func(w http.ResponseWriter, _ *http.Request) {
 		t.Errorf("server should not be called when required flag missing")
@@ -372,13 +476,18 @@ func TestCRM_RegisterDynamicWithoutCredentials(t *testing.T) {
 
 	RegisterDynamicCRM(context.Background())
 
-	var foundRecords bool
+	var foundList bool
 	for _, c := range crmCmd.Commands() {
-		if c.Use == "records" {
-			foundRecords = true
+		if c.Name() != "records" {
+			continue
+		}
+		for _, child := range c.Commands() {
+			if child.Name() == "list" && child.Annotations[crmDynamicCommandAnnotation] == "true" {
+				foundList = true
+			}
 		}
 	}
-	if !foundRecords {
+	if !foundList {
 		t.Fatal("dynamic CRM commands should register before credentials are parsed")
 	}
 }
