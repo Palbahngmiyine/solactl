@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.7](https://github.com/solapi/solactl/compare/v0.1.6...v0.1.7) (2026-05-08)
+
+
+### Features
+
+* **crm:** add dynamic CRM command tree from OpenAPI spec ([9a3830f](https://github.com/solapi/solactl/commit/9a3830f4f7e23976f83d71692df2bc0131fb6c98))
+* **crm:** add dynamic CRM command tree from OpenAPI spec ([5c3ade3](https://github.com/solapi/solactl/commit/5c3ade39472fcc982ef70a1e9e29e5cee4938af9))
+* **crm:** add upload parity commands ([70bb04a](https://github.com/solapi/solactl/commit/70bb04a07b1bb45e7c381f59117a52fab3f97e28))
+
+
+### Bug Fixes
+
+* **client:** repair UTF-8 mojibake in retry debug log ([f5ec0be](https://github.com/solapi/solactl/commit/f5ec0be825134a30dc084e73b174ee503dbc98b8))
+* **crm:** register dynamic commands before auth parse ([5bdd3e9](https://github.com/solapi/solactl/commit/5bdd3e9274ed1b77cddd652c58e9ce60ce82c3af))
+* **crm:** satisfy upload lint ([98cd63a](https://github.com/solapi/solactl/commit/98cd63a0ae025edeecc8dfce3dc48cba9184d01e))
+* **send:** remove now-unused boolPtr helper ([d47d8b9](https://github.com/solapi/solactl/commit/d47d8b9b238f7f7887c4d8f88ce2639503b53de9))
+
 ## [0.1.6](https://github.com/solapi/solactl/compare/v0.1.5...v0.1.6) (2026-05-06)
 
 
