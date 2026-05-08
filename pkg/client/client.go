@@ -144,6 +144,20 @@ func (c *Client) Put(ctx context.Context, path string, body any) (json.RawMessag
 	return c.executeWithRetry(ctx, http.MethodPut, u, data, isRetryableMutation)
 }
 
+// Patch sends a PATCH request with a JSON body. A nil body sends no payload.
+func (c *Client) Patch(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	u := c.baseURL() + "/" + strings.TrimLeft(path, "/")
+	var data []byte
+	if body != nil {
+		var err error
+		data, err = json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("JSON 직렬화 실패: %w", err)
+		}
+	}
+	return c.executeWithRetry(ctx, http.MethodPatch, u, data, isRetryableMutation)
+}
+
 // Delete sends a DELETE request.
 func (c *Client) Delete(ctx context.Context, path string) (json.RawMessage, error) {
 	u := c.baseURL() + "/" + strings.TrimLeft(path, "/")

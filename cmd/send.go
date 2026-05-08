@@ -23,10 +23,10 @@ var sendCmd = &cobra.Command{
 
 // Shared flags available to all send subcommands.
 var (
-	sendFlagTo        string
-	sendFlagFrom      string
-	sendFlagText      string
-	sendFlagScheduled string
+	sendFlagTo             string
+	sendFlagFrom           string
+	sendFlagText           string
+	sendFlagScheduled      string
 	sendFlagFile           string // CSV file for bulk sending
 	sendFlagSkipValidation bool
 	sendFlagStrict         bool
@@ -95,10 +95,7 @@ func sendMessages(c *client.Client, msgs []types.Message) error {
 	batchNum := 0
 
 	for start := 0; start < len(msgs); start += maxBatchSize {
-		end := start + maxBatchSize
-		if end > len(msgs) {
-			end = len(msgs)
-		}
+		end := min(start+maxBatchSize, len(msgs))
 		batch := msgs[start:end]
 		batchNum++
 
@@ -273,4 +270,6 @@ func resolveFrom(c *client.Client) (string, error) {
 }
 
 // boolPtr returns a pointer to the given bool value.
-func boolPtr(v bool) *bool { return &v }
+//
+//go:fix inline
+func boolPtr(v bool) *bool { return new(v) }

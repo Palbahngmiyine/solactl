@@ -151,7 +151,7 @@ func TestConcurrent_InitAndLog(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		if i%2 == 0 {
 			go func() {
 				defer wg.Done()
@@ -179,7 +179,7 @@ func TestRapidToggle(t *testing.T) {
 	SetOutput(&buf)
 	t.Cleanup(func() { Init(false) })
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		if i%2 == 0 {
 			Init(true)
 		} else {
@@ -242,7 +242,7 @@ func TestConcurrent_MixedLevels(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(n int) {
 			defer wg.Done()
 			Debug("debug from goroutine %d", n)

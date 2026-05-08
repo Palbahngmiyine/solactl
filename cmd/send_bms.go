@@ -100,7 +100,7 @@ func runSendBMS(cmd *cobra.Command, args []string) error {
 		},
 	}
 	if sendBMSFlagAd {
-		kakaoOpts.AdFlag = boolPtr(true)
+		kakaoOpts.AdFlag = new(true)
 	}
 
 	if sendBMSFlagFree {
@@ -123,7 +123,7 @@ func runSendBMS(cmd *cobra.Command, args []string) error {
 		}
 
 		if sendBMSFlagAdult {
-			kakaoOpts.BMS.Adult = boolPtr(true)
+			kakaoOpts.BMS.Adult = new(true)
 		}
 
 		buttons, err := buildBMSButtons()

@@ -186,7 +186,7 @@ func TestFormatTable_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(n int) {
 			defer wg.Done()
 			var buf bytes.Buffer

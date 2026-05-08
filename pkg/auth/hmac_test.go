@@ -238,7 +238,7 @@ func TestGenerateAuthorization_Concurrent(t *testing.T) {
 	wg.Add(goroutines)
 
 	errs := make(chan error, goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			result, err := GenerateAuthorization("NCS1234567890ABC", "01234567890123456789012345678901")

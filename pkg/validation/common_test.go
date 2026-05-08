@@ -112,9 +112,9 @@ func TestValidateFrom_Required(t *testing.T) {
 
 func TestValidateCustomFields(t *testing.T) {
 	tests := []struct {
-		name    string
-		fields  map[string]string
-		wantN   int
+		name   string
+		fields map[string]string
+		wantN  int
 	}{
 		{name: "nil_fields", fields: nil, wantN: 0},
 		{name: "empty_fields", fields: map[string]string{}, wantN: 0},
@@ -299,10 +299,9 @@ func TestValidationErrors_HasErrors(t *testing.T) {
 	}
 }
 
-
 func makeNFields(n int) map[string]string {
 	m := make(map[string]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		m["key"+strconv.Itoa(i)] = "val"
 	}
 	return m

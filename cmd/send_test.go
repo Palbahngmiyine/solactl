@@ -474,7 +474,7 @@ func TestSendSMS_JSONOutput(t *testing.T) {
 	output := buf.String()
 
 	// JSON output should be valid JSON
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &parsed); err != nil {
 		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, output)
 	}
@@ -907,7 +907,7 @@ func TestSendMessages_BatchSplit(t *testing.T) {
 
 	// Build 5 messages and call sendMessages directly.
 	var msgs []types.Message
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		msgs = append(msgs, types.Message{
 			To:   fmt.Sprintf("0101111%04d", i),
 			From: "01012345678",
@@ -1417,7 +1417,7 @@ func TestSendMessages_ExactlyMaxBatch(t *testing.T) {
 
 	// Exactly maxBatchSize (5) messages: should result in exactly 1 API call.
 	var msgs []types.Message
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		msgs = append(msgs, types.Message{
 			To:   fmt.Sprintf("0101111%04d", i),
 			From: "01012345678",
@@ -1489,7 +1489,7 @@ func TestSendMessages_MultipleBatches(t *testing.T) {
 
 	// 7 messages with maxBatchSize=3 should yield 3 API calls: 3 + 3 + 1.
 	var msgs []types.Message
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		msgs = append(msgs, types.Message{
 			To:   fmt.Sprintf("0101111%04d", i),
 			From: "01012345678",
@@ -1979,7 +1979,7 @@ func TestSendATA_JSONOutput(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &parsed); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
 	}

@@ -70,7 +70,7 @@ func runSendRCS(cmd *cobra.Command, args []string) error {
 		rcsOpts.TemplateID = sendRCSFlagTemplateID
 	}
 	if sendRCSFlagCopyAllowed {
-		rcsOpts.CopyAllowed = boolPtr(true)
+		rcsOpts.CopyAllowed = new(true)
 	}
 
 	// Handle image upload for RCS

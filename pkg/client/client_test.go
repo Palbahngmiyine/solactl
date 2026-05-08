@@ -673,7 +673,7 @@ func TestGet_Concurrent(t *testing.T) {
 	results := make([]json.RawMessage, goroutines)
 
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
 			results[idx], errs[idx] = directGet(context.Background(), c, ts.URL+"/test", nil)
