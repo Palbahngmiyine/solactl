@@ -13,11 +13,12 @@ import (
 // docs/crm-cli-spec.md for the full design rationale.
 var crmCmd = &cobra.Command{
 	Use:   "crm",
-	Short: "SOLAPI CRM 리소스 (entities/records/...) 를 동적 명령으로 노출합니다",
-	Long: `SOLAPI CRM (crm-core) API를 CLI에 노출합니다.
+	Short: "SOLAPI CRM의 고객 데이터와 레코드를 조회하고 관리합니다",
+	Long: `SOLAPI CRM에서 사용하는 고객 데이터, 엔티티, 레코드를 CLI로 조회하고 관리합니다.
 
-사용 가능한 동적 명령은 백엔드 OpenAPI 스펙으로부터 자동 생성됩니다:
-  solactl crm <리소스> <액션> [경로인자] [--옵션]
+사용 가능한 작업은 로그인한 계정의 CRM 기능에 맞춰 제공됩니다.
+아래 형식으로 리소스와 작업을 선택하세요:
+  solactl crm <리소스> <작업> [값] [옵션]
 
 예시:
   solactl crm entities list
@@ -25,10 +26,10 @@ var crmCmd = &cobra.Command{
   solactl crm records create --data '{"entityId":"ENxxx","name":"홍길동"}'
   solactl crm records list --entityId ENxxx --format csv > export.csv
 
-캐시 무효화:
+최신 CRM 명령이 보이지 않을 때:
   solactl crm config clear-cache
 
-인증/프로필은 'solactl configure'와 root persistent 플래그(--profile, --api-key 등)를 그대로 사용합니다.`,
+인증 정보는 기존 solactl 설정을 사용합니다. 다른 프로필로 실행하려면 --profile을 함께 지정하세요.`,
 }
 
 func init() {
