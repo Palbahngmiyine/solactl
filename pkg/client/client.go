@@ -274,7 +274,7 @@ func (c *Client) executeWithRetryContentType(ctx context.Context, method, rawURL
 				jitter = time.Duration(rand.Int64N(n))
 			}
 			wait := delay + jitter
-			logger.Debug("재시�� %d/%d (대기: %v)", attempt, c.MaxRetries, wait)
+			logger.Debug("재시도 %d/%d (대기: %v)", attempt, c.MaxRetries, wait)
 
 			timer := time.NewTimer(wait)
 			select {
