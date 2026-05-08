@@ -420,7 +420,7 @@ func TestConcurrent_SaveLoad(t *testing.T) {
 	wg.Add(goroutines)
 	panicCh := make(chan string, goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		if i%2 == 0 {
 			go func(n int) {
 				defer wg.Done()

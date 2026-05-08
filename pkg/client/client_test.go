@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -87,6 +90,21 @@ func TestGet_Success(t *testing.T) {
 	}
 }
 
+func TestGet_SkipAuthorizationOmitsAuthorizationHeader(t *testing.T) {
+	c, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization header: got %q, want empty", got)
+		}
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	})
+	c.SkipAuthorization = true
+
+	if _, err := directGet(context.Background(), c, ts.URL+"/public", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestGet_WithParams(t *testing.T) {
 	c, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("key") != "value" {
@@ -143,6 +161,126 @@ func TestPut_Success(t *testing.T) {
 	}
 }
 
+func TestPostMultipart_SendsFormFileAndFields(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "image.png")
+	if err := os.WriteFile(filePath, []byte("\x89PNG\r\n\x1a\npayload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method: got %s, want POST", r.Method)
+		}
+		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "multipart/form-data; boundary=") {
+			t.Errorf("Content-Type: got %q, want multipart/form-data with boundary", ct)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("ParseMultipartForm: %v", err)
+		}
+		if got := r.FormValue("purpose"); got != "cover" {
+			t.Errorf("purpose: got %q", got)
+		}
+		f, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("FormFile: %v", err)
+		}
+		defer func() { _ = f.Close() }()
+		if header.Filename != "image.png" {
+			t.Errorf("filename: got %q", header.Filename)
+		}
+		if got := header.Header.Get("Content-Type"); got != "image/png" {
+			t.Errorf("file content-type: got %q", got)
+		}
+		body, err := io.ReadAll(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "payload") {
+			t.Errorf("file body missing payload: %q", string(body))
+		}
+		_, _ = io.WriteString(w, `{"uploaded":true}`)
+	})
+	c.BaseURLOverride = ts.URL
+
+	result, err := c.PostMultipart(context.Background(), "crm-core/v1/forms/FORM/images", []MultipartField{{Name: "purpose", Value: "cover"}}, MultipartFile{
+		FieldName:   "file",
+		Path:        filePath,
+		FileName:    "image.png",
+		ContentType: "image/png",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(result), "uploaded") {
+		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+func TestMutation_NilBodySendsNoPayload(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		call   func(context.Context, *Client, string) (json.RawMessage, error)
+	}{
+		{
+			name:   "post",
+			method: http.MethodPost,
+			call: func(ctx context.Context, c *Client, path string) (json.RawMessage, error) {
+				return c.Post(ctx, path, nil)
+			},
+		},
+		{
+			name:   "put",
+			method: http.MethodPut,
+			call: func(ctx context.Context, c *Client, path string) (json.RawMessage, error) {
+				return c.Put(ctx, path, nil)
+			},
+		},
+		{
+			name:   "patch",
+			method: http.MethodPatch,
+			call: func(ctx context.Context, c *Client, path string) (json.RawMessage, error) {
+				return c.Patch(ctx, path, nil)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var sawMethod, sawContentType string
+			var sawBody []byte
+			c, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				sawMethod = r.Method
+				sawContentType = r.Header.Get("Content-Type")
+				var err error
+				sawBody, err = io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read body: %v", err)
+				}
+				w.WriteHeader(200)
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			})
+			c.BaseURLOverride = ts.URL
+
+			result, err := tt.call(context.Background(), c, "test")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(string(result), "ok") {
+				t.Errorf("unexpected result: %s", result)
+			}
+			if sawMethod != tt.method {
+				t.Errorf("method: got %s, want %s", sawMethod, tt.method)
+			}
+			if len(sawBody) != 0 {
+				t.Errorf("body: got %q, want empty", string(sawBody))
+			}
+			if sawContentType != "" {
+				t.Errorf("Content-Type: got %q, want empty", sawContentType)
+			}
+		})
+	}
+}
+
 func TestDelete_Success(t *testing.T) {
 	c, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
@@ -195,6 +333,74 @@ func TestGet_400_APIError(t *testing.T) {
 	}
 	if apiErr.ErrorCode != "ValidationError" {
 		t.Errorf("code: got %s", apiErr.ErrorCode)
+	}
+}
+
+func TestParseErrorResponse_MessageField(t *testing.T) {
+	err := parseErrorResponse(400, []byte(`{"message":"필터 형식이 올바르지 않습니다"}`))
+	var apiErr *apierror.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T: %v", err, err)
+	}
+	if apiErr.HTTPStatus != 400 {
+		t.Errorf("status: got %d, want 400", apiErr.HTTPStatus)
+	}
+	if apiErr.ErrorMessage != "필터 형식이 올바르지 않습니다" {
+		t.Errorf("message: got %q", apiErr.ErrorMessage)
+	}
+}
+
+func TestParseErrorResponse_NestedPlanQuotaPayload(t *testing.T) {
+	err := parseErrorResponse(403, []byte(`{"message":{"errorCode":"PlanQuotaExceeded","message":"플랜 한도를 초과했습니다.","dimensionLabel":"저장소","usage":10,"limit":10,"nextTier":"PROFESSIONAL","nextTierLimit":100},"error":"Forbidden","statusCode":403}`))
+	var apiErr *apierror.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T: %v", err, err)
+	}
+	if apiErr.ErrorCode != "PlanQuotaExceeded" {
+		t.Fatalf("code: got %q", apiErr.ErrorCode)
+	}
+	for _, want := range []string{"플랜 한도를 초과했습니다", "현재 사용량: 저장소 10/10", "권장 플랜: PROFESSIONAL"} {
+		if !strings.Contains(apiErr.ErrorMessage, want) {
+			t.Errorf("message %q should contain %q", apiErr.ErrorMessage, want)
+		}
+	}
+}
+
+func TestParseErrorResponse_FlatPlanFeaturePayload(t *testing.T) {
+	err := parseErrorResponse(403, []byte(`{"errorCode":"PlanFeatureDisabled","errorMessage":"현재 플랜에서 사용할 수 없는 기능입니다.","feature":"agent.enabled","dimensionLabel":"AI 에이전트","nextTier":"PROFESSIONAL"}`))
+	var apiErr *apierror.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T: %v", err, err)
+	}
+	if apiErr.ErrorCode != "PlanFeatureDisabled" {
+		t.Fatalf("code: got %q", apiErr.ErrorCode)
+	}
+	for _, want := range []string{"현재 플랜에서 사용할 수 없는 기능입니다", "제한 기능: AI 에이전트", "사용 가능한 플랜: PROFESSIONAL"} {
+		if !strings.Contains(apiErr.ErrorMessage, want) {
+			t.Errorf("message %q should contain %q", apiErr.ErrorMessage, want)
+		}
+	}
+}
+
+func TestParseErrorResponse_PlanPayloadWithNullTierDoesNotRenderNil(t *testing.T) {
+	err := parseErrorResponse(403, []byte(`{"message":{"errorCode":"PlanQuotaExceeded","message":"플랜 한도를 초과했습니다.","dimensionLabel":"저장소","usage":10,"limit":10,"nextTier":null,"nextTierLimit":null},"error":"Forbidden","statusCode":403}`))
+	var apiErr *apierror.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T: %v", err, err)
+	}
+	if apiErr.ErrorCode != "PlanQuotaExceeded" {
+		t.Fatalf("code: got %q", apiErr.ErrorCode)
+	}
+	if strings.Contains(apiErr.ErrorMessage, "<nil>") {
+		t.Fatalf("message should not render JSON null values: %q", apiErr.ErrorMessage)
+	}
+	if strings.Contains(apiErr.ErrorMessage, "권장 플랜") {
+		t.Fatalf("message should omit missing recommended plan: %q", apiErr.ErrorMessage)
+	}
+	for _, want := range []string{"플랜 한도를 초과했습니다", "현재 사용량: 저장소 10/10"} {
+		if !strings.Contains(apiErr.ErrorMessage, want) {
+			t.Errorf("message %q should contain %q", apiErr.ErrorMessage, want)
+		}
 	}
 }
 
@@ -673,7 +879,7 @@ func TestGet_Concurrent(t *testing.T) {
 	results := make([]json.RawMessage, goroutines)
 
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
 			results[idx], errs[idx] = directGet(context.Background(), c, ts.URL+"/test", nil)

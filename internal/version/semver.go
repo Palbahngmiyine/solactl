@@ -95,10 +95,7 @@ func comparePrereleaseIdentifiers(a, b string) int {
 	aParts := strings.Split(a, ".")
 	bParts := strings.Split(b, ".")
 
-	limit := len(aParts)
-	if len(bParts) < limit {
-		limit = len(bParts)
-	}
+	limit := min(len(bParts), len(aParts))
 
 	for i := 0; i < limit; i++ {
 		aNum, aIsNum := strconv.Atoi(aParts[i])

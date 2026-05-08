@@ -142,7 +142,7 @@ func TestBalance_JSON(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &parsed); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
 	}
