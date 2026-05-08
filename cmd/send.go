@@ -268,8 +268,3 @@ func resolveFrom(c *client.Client) (string, error) {
 			len(phones), strings.Join(lines, "\n"))
 	}
 }
-
-// boolPtr returns a pointer to the given bool value.
-//
-//go:fix inline
-func boolPtr(v bool) *bool { return new(v) }
