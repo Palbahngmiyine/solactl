@@ -460,7 +460,7 @@ func TestClassify_Concurrent(t *testing.T) {
 	wg.Add(goroutines)
 
 	results := make([]*ClassifiedError, goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
 			results[idx] = Classify(apiErr)

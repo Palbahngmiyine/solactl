@@ -191,15 +191,13 @@ func TestValidateMessages_Concurrent(t *testing.T) {
 	t.Cleanup(func() {})
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 20 {
+		wg.Go(func() {
 			msgs := []types.Message{
 				{To: "01012345678", From: "01011112222", Text: "hello"},
 			}
 			_ = ValidateMessages(msgs, Options{AutoTypeDetect: true})
-		}()
+		})
 	}
 	wg.Wait()
 }

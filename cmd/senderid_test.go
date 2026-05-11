@@ -645,8 +645,8 @@ func TestSenderIDList_EmptyActive(t *testing.T) {
 		t.Errorf("expected PHONE NUMBER header even for empty list, got:\n%s", output)
 	}
 	// Should not contain any phone number data
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(strings.TrimSpace(output), "\n")
+	for line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
@@ -770,8 +770,8 @@ func TestSenderIDList_AllFieldsEmpty(t *testing.T) {
 	// Empty method and expireAt should show "-"
 	// Count occurrences of "-" that are not part of table borders
 	// The phone number row should have "-" for status, method, and expireAt
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(output, "\n")
+	for line := range lines {
 		if strings.Contains(line, "01000000000") {
 			// This data row should contain "-" for empty fields
 			dashCount := strings.Count(line, "-")

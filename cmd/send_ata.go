@@ -74,7 +74,7 @@ func runSendATA(cmd *cobra.Command, args []string) error {
 		Title:      sendATAFlagTitle,
 	}
 	if sendATAFlagDisableSms {
-		kakaoOpts.DisableSms = boolPtr(true)
+		kakaoOpts.DisableSms = new(true)
 	}
 
 	var msgs []types.Message
