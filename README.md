@@ -54,6 +54,13 @@ solactl senderid list
 # 발송 내역 조회
 solactl messages list
 
+# 발송 내역 export (CSV/JSON/JSONL)
+solactl messages export --output messages.csv
+
+# 일별 통계 export (CSV/JSON/JSONL)
+solactl statistics export-daily --output stats.csv \
+  --start-date 2026-05-04 --end-date 2026-05-11
+
 # 잔액 조회
 solactl balance
 
@@ -119,4 +126,53 @@ solactl quota list-requests --status PENDING   # 검토 대기 중인 요청만
 상태값은 `PENDING` (검토 대기) → `APPROVED` (승인) 또는 `REJECTED` (반려) 로 변경됩니다.
 
 > **주의** — 동일 계정에 PENDING 요청이 이미 있을 때 새 요청을 제출하면 이전 요청은 자동으로 REJECTED 처리됩니다.
+
+## 발송 내역 / 통계 Export
+
+대량 export는 messages-v4 부하를 줄이기 위해 다음 가드를 자동 적용합니다.
+
+- **6개월(180일) 이전 데이터는 조회 불가** — 사내 DB에서 자동 삭제됩니다.
+- **7일 초과 범위는 1일 단위 윈도우로 자동 분할** — UTC 자정 기준으로 잘게 호출.
+- **`--throttle` (기본 500ms)** — 페이지/윈도우 호출 사이 sleep. 최소 100ms 강제.
+- **`--page-size` 강제 상한** — `messages export` 200, `statistics export-daily` 100.
+- **Ctrl+C 시 부분 결과 보존** — stderr에 `--resume-token` 안내. 다음 명령에 `--append --resume-token <토큰>`을 붙여 이어받을 수 있습니다.
+
+### 메시지 내역 export
+
+```bash
+# 기본: 최근 7일, CSV, page-size 50, throttle 500ms
+solactl messages export --output messages.csv
+
+# 31일 범위 — 자동으로 31개 1일 윈도우로 분할
+solactl messages export --output messages.csv \
+  --start-date 2026-04-02 --end-date 2026-05-03
+
+# JSONL 포맷 + 필터
+solactl messages export --output messages.jsonl --format jsonl \
+  --type SMS --status-code 4000 --from 029302266
+
+# 중단 후 재개
+solactl messages export --output messages.csv --append \
+  --resume-token eyJ2IjoxLCJ3IjoiMjAyNi0wNS0wMSJ9
+```
+
+CSV 컬럼: `messageId, type, status, statusCode, to, from, country, subject, dateCreated, dateUpdated, groupId, accountId, text, customFields`.
+
+### 일별 통계 export
+
+```bash
+# 7일 범위
+solactl statistics export-daily --output stats.csv \
+  --start-date 2026-05-04 --end-date 2026-05-11
+
+# 31일 범위 — 자동 일별 분할
+solactl statistics export-daily --output stats.csv \
+  --start-date 2026-04-02 --end-date 2026-05-03
+
+# Windows Excel 한글 호환 (UTF-8 BOM)
+solactl statistics export-daily --output stats.csv \
+  --start-date 2026-05-04 --end-date 2026-05-11 --bom
+```
+
+CSV는 고정 prefix (`date, accountId, prepaid, balance, point, profit, refundBalance, refundPoint`) + 응답에서 발견된 모든 `count.*` 키를 정렬해 컬럼화 (`count_SMS, count_LMS, count_MMS, ...`).
 
