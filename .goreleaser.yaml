@@ -31,6 +31,24 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Sign checksums.txt with cosign keyless (Sigstore + Fulcio + Rekor).
+# Produces checksums.txt.sig and checksums.txt.pem alongside the checksums
+# file in the GitHub release. Verification is documented in README.md
+# under the "Advanced: signature verification" section.
+signs:
+  - id: checksums-cosign
+    artifacts: checksum
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    output: true
+
 changelog:
   disable: true
 
