@@ -16,13 +16,49 @@ Linux와 macOS를 우선 지원합니다.
 
 ## 설치
 
-### 스크립트 설치 (Linux / macOS)
+모든 설치 방법은 관리자 권한 없이 **사용자 영역**에 설치됩니다.
+
+### Linux / macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/solapi/solactl/main/scripts/install.sh | bash
 ```
 
-`~/.local/bin`에 설치됩니다. PATH에 포함되어 있지 않으면 안내 메시지가 출력됩니다.
+- 설치 경로: `~/.local/bin/solactl`
+- 체크섬(SHA256) 검증 후 압축 해제
+- `PATH`에 포함되어 있지 않으면 셸 설정 파일(`~/.zshrc` / `~/.bashrc`) 등록 안내 출력
+
+### Windows (PowerShell)
+
+winget처럼 사용자 영역에만 설치되며 관리자 권한이 필요하지 않습니다. PowerShell 5.1 이상(또는 PowerShell 7+) 에서 실행하세요.
+
+```powershell
+irm https://raw.githubusercontent.com/solapi/solactl/main/scripts/install.ps1 | iex
+```
+
+- 설치 경로: `%LOCALAPPDATA%\Programs\solactl\solactl.exe`
+- 체크섬(SHA256) 검증 후 zip 압축 해제
+- 사용자 `PATH`(`HKCU\Environment\Path`) 에 설치 디렉터리를 자동 추가 — 새 터미널부터 적용
+- 실행 중인 `solactl.exe` 가 잠겨 있으면 기존 파일을 `solactl.exe.old` 로 옮긴 뒤 교체
+
+#### 옵션
+
+특정 버전 고정 / 설치 경로 지정이 필요하면 스크립트를 로컬에 받아 인자로 실행합니다.
+
+```powershell
+# 스크립트 다운로드 후 실행
+Invoke-WebRequest -UseBasicParsing `
+  -Uri https://raw.githubusercontent.com/solapi/solactl/main/scripts/install.ps1 `
+  -OutFile $env:TEMP\install.ps1
+
+# 특정 버전 설치
+powershell -ExecutionPolicy Bypass -File $env:TEMP\install.ps1 -Version v0.1.6
+
+# 설치 경로 변경
+powershell -ExecutionPolicy Bypass -File $env:TEMP\install.ps1 -InstallDir D:\tools\solactl
+```
+
+> `irm | iex` 한 줄 설치는 메모리에서 실행되므로 별도의 ExecutionPolicy 설정이 필요하지 않습니다.
 
 ### 소스 빌드
 
@@ -35,9 +71,13 @@ make install      # $GOPATH/bin에 설치
 
 ### 업그레이드
 
+설치된 `solactl` 자체에서 업그레이드할 수 있습니다. 모든 플랫폼 공통입니다.
+
 ```bash
 solactl upgrade
 ```
+
+또는 위의 설치 스크립트를 다시 실행해도 됩니다.
 
 ## 사용법
 
