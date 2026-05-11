@@ -81,7 +81,7 @@ solactl upgrade
 
 ### 서명 검증 (고급, 선택)
 
-릴리스의 `checksums.txt` 는 [cosign keyless](https://docs.sigstore.dev/cosign/signing/overview/) 로 서명됩니다. 일반 설치 경로는 SHA256 체크섬만 검증하지만, 추가 보증이 필요하면 cosign 으로 서명을 검증할 수 있습니다 (kubectl 와 동일한 모델).
+릴리스의 `checksums.txt` 는 [cosign keyless](https://docs.sigstore.dev/cosign/signing/overview/) 로 서명됩니다. 일반 설치 경로는 SHA256 체크섬만 검증하지만, 추가 보증이 필요하면 cosign 으로 서명을 검증할 수 있습니다.
 
 검증 절차와 신뢰 모델은 [VERIFYING.md](./VERIFYING.md) 를 참고하세요.
 

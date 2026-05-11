@@ -43,7 +43,7 @@ cosign verify-blob checksums.txt \
 | 일반 설치 (`install.sh` / `install.ps1`) | TLS + SHA256 (`checksums.txt`) | 불필요 |
 | **고급 검증 (본 문서)** | TLS + SHA256 + cosign 서명 + Rekor 트랜스페어런시 로그 | `cosign` 2.0+ |
 
-`kubectl` 과 동일한 패턴입니다 — 일반 설치 경로는 SHA256 만 검증하고, 서명 검증은 추가 보증이 필요한 사용자가 선택적으로 수행합니다.
+일반 설치 경로는 SHA256 만 검증하고, 서명 검증은 추가 보증이 필요한 사용자가 선택적으로 수행합니다.
 
 ## 신뢰 모델
 
