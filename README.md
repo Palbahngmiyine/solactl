@@ -79,41 +79,11 @@ solactl upgrade
 
 또는 위의 설치 스크립트를 다시 실행해도 됩니다.
 
-### 서명 검증 (고급)
+### 서명 검증 (고급, 선택)
 
-solactl 릴리스의 `checksums.txt` 는 [cosign keyless](https://docs.sigstore.dev/cosign/signing/overview/) 로 서명됩니다 (Sigstore Fulcio CA + Rekor transparency log). 추가 보안이 필요한 환경에서 선택적으로 검증할 수 있습니다.
+릴리스의 `checksums.txt` 는 [cosign keyless](https://docs.sigstore.dev/cosign/signing/overview/) 로 서명됩니다. 일반 설치 경로는 SHA256 체크섬만 검증하지만, 추가 보증이 필요하면 cosign 으로 서명을 검증할 수 있습니다 (kubectl 와 동일한 모델).
 
-> 일반 설치는 SHA256 체크섬만 검증합니다 — kubectl 와 동일한 보안 모델입니다. 본 섹션의 서명 검증은 *선택* 입니다.
-
-릴리스 아티팩트:
-
-| 파일 | 용도 |
-|------|------|
-| `checksums.txt` | 각 바이너리 아카이브의 SHA256 |
-| `checksums.txt.sig` | cosign keyless 서명 |
-| `checksums.txt.pem` | 서명에 사용된 ephemeral 인증서 |
-
-검증 절차 (cosign 2.0+ 필요):
-
-```bash
-TAG=$(curl -fsSL https://api.github.com/repos/solapi/solactl/releases/latest \
-  | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-BASE="https://github.com/solapi/solactl/releases/download/${TAG}"
-
-curl -fsSLO "${BASE}/checksums.txt"
-curl -fsSLO "${BASE}/checksums.txt.sig"
-curl -fsSLO "${BASE}/checksums.txt.pem"
-
-cosign verify-blob checksums.txt \
-  --signature checksums.txt.sig \
-  --certificate checksums.txt.pem \
-  --certificate-identity-regexp '^https://github\.com/solapi/solactl/\.github/workflows/release-please\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
-```
-
-`Verified OK` 가 출력되면 `checksums.txt` 가 **이 저장소의 release 워크플로우가 발급한 서명** 임이 증명됩니다. 이후 `install.sh` / `install.ps1` 가 `checksums.txt` 로 바이너리의 SHA256 을 검증하므로 *서명된 체크섬 → 검증된 바이너리* 의 신뢰 체인이 완성됩니다.
-
-서명 데이터는 [Rekor transparency log](https://search.sigstore.dev/) 에서도 조회할 수 있습니다.
+검증 절차와 신뢰 모델은 [VERIFYING.md](./VERIFYING.md) 를 참고하세요.
 
 ## 사용법
 
