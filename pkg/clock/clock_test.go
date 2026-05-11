@@ -222,6 +222,9 @@ func TestFake_SleepsCopy(t *testing.T) {
 	// 반환된 슬라이스를 변조해도 내부 상태에 영향이 없어야 한다.
 	got[0] = 999 * time.Hour
 	got = append(got, 7*time.Hour)
+	if len(got) != 2 {
+		t.Fatalf("local append failed: len=%d", len(got))
+	}
 	again := f.Sleeps()
 	if len(again) != 1 {
 		t.Fatalf("after mutation Sleeps len=%d, want 1", len(again))
