@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,6 +21,11 @@ import (
 	"github.com/solapi/solactl/pkg/output"
 	"github.com/solapi/solactl/pkg/progress"
 )
+
+// errStatisticsRecordCap은 --max-records로 설정된 hard cap을 초과했을 때 반환되는
+// sentinel. exporter.Run이 이 에러를 만나면 부분 결과 + resume-token을 보존하며
+// graceful 종료한다 (OOM 직전 fail-fast).
+var errStatisticsRecordCap = errors.New("statistics: --max-records hard cap 도달")
 
 // 상한과 기본값. statistics/daily 엔드포인트는 messages보다 보수적으로 설정.
 const (
@@ -41,6 +47,7 @@ var (
 	statsExportFlagThrottle    time.Duration
 	statsExportFlagPageSize    int
 	statsExportFlagMaxPages    int
+	statsExportFlagMaxRecords  int
 	statsExportFlagAppend      bool
 	statsExportFlagBOM         bool
 	statsExportFlagProgress    string
@@ -75,6 +82,8 @@ func init() {
 	f.DurationVar(&statsExportFlagThrottle, "throttle", statisticsExportThrottleDefault, "페이지/윈도우 호출 사이 sleep (최소 100ms)")
 	f.IntVar(&statsExportFlagPageSize, "page-size", statisticsExportPageSizeDefault, fmt.Sprintf("페이지당 건수 (최대 %d)", statisticsExportPageSizeMax))
 	f.IntVar(&statsExportFlagMaxPages, "max-pages", 0, "전체 페이지 상한 (0=무제한)")
+	f.IntVar(&statsExportFlagMaxRecords, "max-records", 0,
+		"CSV record 누적 상한 (0=무제한). 초과 시 부분 결과 + resume-token을 보존하며 종료. OOM 방어용.")
 	f.BoolVar(&statsExportFlagAppend, "append", false, "기존 파일에 이어쓰기 (헤더 검증)")
 	f.BoolVar(&statsExportFlagBOM, "bom", false, "UTF-8 BOM 추가 (Windows Excel 한글)")
 	f.StringVar(&statsExportFlagProgress, "progress", "auto", "진행률 표시 모드 (auto|on|off)")
@@ -203,8 +212,8 @@ func runStatisticsExportDaily(_ *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = closer.Close() }()
 
-	// 10. RowWriter 생성 (format별).
-	rw, err := newStatisticsRowWriter(format, w, statsExportFlagOutput, statsExportFlagAppend, statsExportFlagBOM)
+	// 10. RowWriter 생성 (format별). --max-records는 CSV format에만 적용된다.
+	rw, err := newStatisticsRowWriter(format, w, statsExportFlagOutput, statsExportFlagAppend, statsExportFlagBOM, statsExportFlagMaxRecords)
 	if err != nil {
 		return err
 	}
@@ -249,6 +258,11 @@ func runStatisticsExportDaily(_ *cobra.Command, _ []string) error {
 	// 15. 부분 결과 + 재개 안내.
 	if result.ResumeToken != "" {
 		_, _ = fmt.Fprintf(errOut(), "\n중단됨. 누적 %d건 처리.\n", result.RecordsWritten)
+		if errors.Is(runErr, errStatisticsRecordCap) {
+			_, _ = fmt.Fprintf(errOut(),
+				"원인: --max-records=%d 도달. 기간을 분할하거나 cap을 높여 재실행하세요.\n",
+				statsExportFlagMaxRecords)
+		}
 		_, _ = fmt.Fprintf(errOut(), "재개:\n  solactl statistics export-daily --output %s --append --resume-token %s\n",
 			statsExportFlagOutput, result.ResumeToken)
 	}
@@ -336,12 +350,15 @@ func newStatisticsFetcher(c *client.Client, pageSize int, prepaid string) export
 
 // statisticsCSVRowWriter는 union-header 전략으로 모든 record를 누적 후 FinalizeWrite에서
 // 단일 헤더와 함께 일괄 출력한다. count.* union-header를 사전에 알 수 없으므로
-// streaming이 불가능하고 모든 record를 메모리에 보관할 수밖에 없다. 누적량이
-// statisticsCSVMemoryWarnThreshold를 초과하면 stderr에 1회 경고를 출력하여 사용자가
-// 기간 분할을 결정할 수 있게 한다.
+// streaming이 불가능하고 모든 record를 메모리에 보관할 수밖에 없다.
 //
-// 동시성 계약: WriteRecord / FinalizeWrite는 단일 goroutine에서만 호출되어야 한다
-// (records / countKeys / memWarned는 unsynchronized). exporter.Run이 이 invariant를 보장한다.
+// OOM 방어 2단계:
+//  1. memWarnThreshold 도달 → stderr 1회 경고 (사용자에게 위험 알림)
+//  2. memCapHard 도달 → errStatisticsRecordCap 반환 → exporter graceful 종료 (강제 fail-fast)
+//
+// 동시성: records / countKeys는 단일 goroutine 호출 전제 (exporter.Run이 보장).
+// memWarned/finalized 두 latch만 atomic으로 보호되어 잘못된 다중 호출에서도
+// 정확히 1회만 발화한다 — 방어적 부분 안전망.
 type statisticsCSVRowWriter struct {
 	w            io.Writer
 	appendMode   bool
@@ -351,9 +368,11 @@ type statisticsCSVRowWriter struct {
 	records   []*dailyStatRecord
 	countKeys map[string]struct{}
 
-	memWarnWriter    io.Writer // nil이면 비활성 (테스트용 명시 옵트아웃)
-	memWarnThreshold int       // 0이면 비활성
-	memWarned        bool      // 1회만 출력하기 위한 latch
+	memWarnWriter    io.Writer    // nil이면 경고 비활성 (테스트용 명시 옵트아웃)
+	memWarnThreshold int          // 0이면 비활성
+	memCapHard       int          // 0이면 무제한; >0 도달 시 errStatisticsRecordCap 반환
+	memWarned        atomic.Bool  // 경고 latch (1회 출력 보장)
+	finalized        atomic.Bool  // FinalizeWrite idempotency latch
 }
 
 func (s *statisticsCSVRowWriter) WriteRecord(rec json.RawMessage) error {
@@ -365,15 +384,22 @@ func (s *statisticsCSVRowWriter) WriteRecord(rec json.RawMessage) error {
 	for k := range r.Count {
 		s.countKeys[k] = struct{}{}
 	}
-	if !s.memWarned && s.memWarnThreshold > 0 && s.memWarnWriter != nil &&
-		len(s.records) >= s.memWarnThreshold {
-		s.memWarned = true
+	// 1단계 경고 (warned latch는 CAS로 정확히 1회만 발화).
+	if s.memWarnThreshold > 0 && s.memWarnWriter != nil &&
+		len(s.records) >= s.memWarnThreshold &&
+		s.memWarned.CompareAndSwap(false, true) {
 		_, _ = fmt.Fprintf(s.memWarnWriter,
 			"경고: 메모리에 누적된 statistics record가 %d건을 넘었습니다. "+
-				"union-header 전략 특성상 모든 record를 보관해야 합니다. "+
-				"매우 큰 기간/계정 export는 기간을 분할하여 실행하세요.\n",
+				"union-header 특성상 모든 record를 보관해야 합니다. "+
+				"OOM 위험이 있으니 --start-date/--end-date로 기간을 분할하거나 "+
+				"--max-records로 hard cap을 설정하세요. (이 경고는 1회만 출력됩니다.)\n",
 			s.memWarnThreshold,
 		)
+	}
+	// 2단계 hard cap (>0일 때만 활성, 부분 결과 + resume-token은 exporter가 보존).
+	if s.memCapHard > 0 && len(s.records) >= s.memCapHard {
+		return fmt.Errorf("%w (%d건). 기간을 분할하여 재실행하세요",
+			errStatisticsRecordCap, s.memCapHard)
 	}
 	return nil
 }
@@ -383,7 +409,12 @@ func (s *statisticsCSVRowWriter) Flush() error { return nil }
 
 // FinalizeWrite는 누적된 record를 union header로 한 번에 write한다.
 // runErr 발생 후에도 호출되어 부분 결과를 보존한다.
+// 두 번째 호출은 no-op으로 처리되어 defer + 명시 호출 충돌, double close,
+// CSV 헤더 재기록 같은 미정의 동작을 차단한다 (idempotent).
 func (s *statisticsCSVRowWriter) FinalizeWrite() error {
+	if !s.finalized.CompareAndSwap(false, true) {
+		return nil
+	}
 	if s.appendReader != nil {
 		defer func() { _ = s.appendReader.Close() }()
 	}
@@ -448,7 +479,7 @@ func formatNumericCell(v any) string {
 	}
 }
 
-func newStatisticsRowWriter(format string, w io.Writer, path string, appendMode, bom bool) (exporter.RowWriter, error) {
+func newStatisticsRowWriter(format string, w io.Writer, path string, appendMode, bom bool, maxRecords int) (exporter.RowWriter, error) {
 	switch format {
 	case "csv":
 		rw := &statisticsCSVRowWriter{
@@ -458,6 +489,7 @@ func newStatisticsRowWriter(format string, w io.Writer, path string, appendMode,
 			countKeys:        make(map[string]struct{}),
 			memWarnWriter:    errOut(),
 			memWarnThreshold: statisticsCSVMemoryWarnThreshold,
+			memCapHard:       maxRecords,
 		}
 		if appendMode && path != "-" {
 			// Append 모드: 기존 헤더는 FinalizeWrite 시점에 검증한다 — union 결정 후에만 비교 가능.

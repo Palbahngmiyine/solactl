@@ -776,6 +776,44 @@ func TestStatisticsExportDaily_5xxError_PartialDataPreserved(t *testing.T) {
 	}
 }
 
+// TestStatisticsExportDaily_MaxRecordsCap_E2E는 --max-records가 e2e CLI 흐름에서
+// 부분 결과 + resume-token + cap-원인 안내까지 모두 보존하는지 검증한다.
+func TestStatisticsExportDaily_MaxRecordsCap_E2E(t *testing.T) {
+	stderr, tmpDir := setupStatisticsExportTest(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `[
+			{"accountId":"A","date":"2026-05-09T00:00:00.000Z","count":{"SMS":1},"balance":0,"point":0,"profit":0},
+			{"accountId":"A","date":"2026-05-09T00:00:00.000Z","count":{"SMS":2},"balance":0,"point":0,"profit":0},
+			{"accountId":"A","date":"2026-05-09T00:00:00.000Z","count":{"SMS":3},"balance":0,"point":0,"profit":0}
+		]`)
+	})
+
+	outPath := filepath.Join(tmpDir, "cap.csv")
+	err := runStatsExport(
+		"--output", outPath,
+		"--start-date", recentDateUTC(1), "--end-date", recentDateUTC(0),
+		"--page-size", "3",
+		"--max-records", "2",
+		"--throttle", "100ms", "--progress", "off",
+	)
+	if err == nil {
+		t.Fatal("expected error from --max-records cap")
+	}
+	if !errors.Is(err, errStatisticsRecordCap) {
+		t.Errorf("err=%v, want errors.Is(err, errStatisticsRecordCap)", err)
+	}
+	// FinalizeWrite가 runErr 후에도 호출되어 누적된 2건이 디스크에 보존되어야 한다.
+	rows := mustReadCSV(t, outPath)
+	if len(rows) < 3 { // header + 2 records
+		t.Fatalf("rows=%d want >=3 (header + 누적분 보존)", len(rows))
+	}
+	out := stderr.String()
+	for _, want := range []string{"--max-records=2 도달", "--resume-token"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stderr에 %q 누락: %q", want, out)
+		}
+	}
+}
+
 // TestStatisticsCSVRowWriter_MemoryWarn은 union-header 누적 메모리 가드 회귀:
 // 모든 record를 메모리에 보관해야 하므로 OOM 위험이 있고, 임계치 도달 시 stderr에
 // 1회만 경고를 출력해야 한다 (idempotency). 각 sub-test는 records 누적량(state
@@ -800,7 +838,7 @@ func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 		if stderr.Len() != 0 {
 			t.Errorf("임계치 미만에서 경고 발생: %q", stderr.String())
 		}
-		if rw.memWarned {
+		if rw.memWarned.Load() {
 			t.Error("memWarned가 true로 설정되면 안 됨")
 		}
 		if got := len(rw.records); got != 4 {
@@ -853,7 +891,7 @@ func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 				t.Fatalf("WriteRecord: %v", err)
 			}
 		}
-		if rw.memWarned {
+		if rw.memWarned.Load() {
 			t.Error("writer nil인데 memWarned=true (가드 무력화)")
 		}
 		if got := len(rw.records); got != 5 {
@@ -926,6 +964,221 @@ func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 			t.Errorf("records 누적량=%d, want 1 (성공 1건 + 실패 무누적)", got)
 		}
 	})
+
+	t.Run("경고 메시지에 분할 가이드 포함", func(t *testing.T) {
+		var stderr bytes.Buffer
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    &stderr,
+			memWarnThreshold: 1,
+		}
+		if err := rw.WriteRecord(json.RawMessage(`{}`)); err != nil {
+			t.Fatalf("WriteRecord: %v", err)
+		}
+		out := stderr.String()
+		// 사용자가 즉시 취할 수 있는 행동 안내가 포함되어야 한다 (S4).
+		for _, want := range []string{"--start-date", "--end-date", "--max-records", "1회만 출력"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("경고 메시지에 %q 누락: %q", want, out)
+			}
+		}
+	})
+}
+
+// TestStatisticsCSVRowWriter_MaxRecordsCap는 --max-records (memCapHard)가
+// 정확히 임계치에서 sentinel 에러를 반환하고 records 누적은 멈추지 않는
+// 점(exporter가 graceful 종료 책임)을 검증한다.
+func TestStatisticsCSVRowWriter_MaxRecordsCap(t *testing.T) {
+	t.Run("cap 도달 시 errStatisticsRecordCap 반환", func(t *testing.T) {
+		rw := &statisticsCSVRowWriter{
+			w:          io.Discard,
+			countKeys:  make(map[string]struct{}),
+			memCapHard: 3,
+		}
+		rec := json.RawMessage(`{"date":"2026-05-09","accountId":"AC1","count":{}}`)
+		// 처음 2건은 OK.
+		for i := range 2 {
+			if err := rw.WriteRecord(rec); err != nil {
+				t.Fatalf("WriteRecord %d: 예기치 못한 에러: %v", i, err)
+			}
+		}
+		// 3건째에 cap 도달 (len(records) >= 3).
+		err := rw.WriteRecord(rec)
+		if !errors.Is(err, errStatisticsRecordCap) {
+			t.Fatalf("err=%v, want errStatisticsRecordCap", err)
+		}
+		// records는 cap 도달 시점까지 누적 (exporter가 부분 결과 보존).
+		if got := len(rw.records); got != 3 {
+			t.Errorf("records 누적량=%d, want 3", got)
+		}
+	})
+
+	t.Run("cap=0은 무제한 (sentinel 발생 안 함)", func(t *testing.T) {
+		rw := &statisticsCSVRowWriter{
+			w:          io.Discard,
+			countKeys:  make(map[string]struct{}),
+			memCapHard: 0,
+		}
+		rec := json.RawMessage(`{"date":"2026-05-09","accountId":"AC1","count":{}}`)
+		for range 50 {
+			if err := rw.WriteRecord(rec); err != nil {
+				t.Fatalf("WriteRecord: %v", err)
+			}
+		}
+	})
+
+	t.Run("cap < threshold면 cap이 먼저 발화 (디스크에는 부분 결과)", func(t *testing.T) {
+		// 경고는 threshold에 도달 못 하고, cap이 먼저 hit.
+		var stderr bytes.Buffer
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    &stderr,
+			memWarnThreshold: 100,
+			memCapHard:       2,
+		}
+		rec := json.RawMessage(`{"date":"2026-05-09","accountId":"AC1","count":{}}`)
+		if err := rw.WriteRecord(rec); err != nil {
+			t.Fatal(err)
+		}
+		err := rw.WriteRecord(rec)
+		if !errors.Is(err, errStatisticsRecordCap) {
+			t.Fatalf("err=%v, want errStatisticsRecordCap", err)
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("cap이 먼저 발화해야 하는데 경고 출력됨: %q", stderr.String())
+		}
+	})
+}
+
+// TestStatisticsCSVRowWriter_FinalizeIdempotent는 FinalizeWrite가 두 번 호출되어도
+// panic / double close / 헤더 재기록 없이 no-op으로 반환되는지 검증한다 (S2).
+func TestStatisticsCSVRowWriter_FinalizeIdempotent(t *testing.T) {
+	var buf bytes.Buffer
+	rw := &statisticsCSVRowWriter{
+		w:         &buf,
+		countKeys: make(map[string]struct{}),
+	}
+	rec := json.RawMessage(`{"date":"2026-05-09","accountId":"AC1","count":{"SMS":1}}`)
+	if err := rw.WriteRecord(rec); err != nil {
+		t.Fatalf("WriteRecord: %v", err)
+	}
+	if err := rw.FinalizeWrite(); err != nil {
+		t.Fatalf("first FinalizeWrite: %v", err)
+	}
+	firstOutput := buf.String()
+	if firstOutput == "" {
+		t.Fatal("first FinalizeWrite produced no output")
+	}
+	// 두 번째 호출은 no-op이어야 한다 — 헤더 재기록 없음.
+	buf.Reset()
+	if err := rw.FinalizeWrite(); err != nil {
+		t.Errorf("second FinalizeWrite (no-op 기대): %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("두 번째 FinalizeWrite가 출력함: %q", buf.String())
+	}
+}
+
+// TestStatisticsCSVRowWriter_FinalizeIdempotent_AppendReaderNotDoubleClosed는
+// appendReader가 두 번째 FinalizeWrite에서 다시 close되지 않는지 검증.
+func TestStatisticsCSVRowWriter_FinalizeIdempotent_AppendReaderNotDoubleClosed(t *testing.T) {
+	closer := &countingCloser{ReadCloser: io.NopCloser(strings.NewReader("date,accountId\n"))}
+	rw := &statisticsCSVRowWriter{
+		w:            io.Discard,
+		appendMode:   true,
+		appendReader: closer,
+		countKeys:    make(map[string]struct{}),
+	}
+	// 첫 호출.
+	_ = rw.FinalizeWrite()
+	// 두 번째 호출 — close가 한 번 더 호출되면 안 됨.
+	_ = rw.FinalizeWrite()
+	if closer.closes != 1 {
+		t.Errorf("appendReader.Close 호출 횟수=%d, want 1", closer.closes)
+	}
+}
+
+type countingCloser struct {
+	io.ReadCloser
+	closes int
+}
+
+func (c *countingCloser) Close() error {
+	c.closes++
+	return c.ReadCloser.Close()
+}
+
+// TestStatisticsCSVRowWriter_ConcurrentLatches는 단일 goroutine 사용이 invariant이지만
+// 잘못된 다중 호출(예: 향후 worker pool)에서도 memWarned/finalized latch가
+// 정확히 1회만 발화하는지 검증 (S1 atomic 보호).
+//
+// records / countKeys는 unsynchronized — race detector PASS는 보장하지 않는다.
+// 이 테스트는 latch 동작만 race 안전한지 확인하기 위해 race detector에서 실행.
+func TestStatisticsCSVRowWriter_ConcurrentLatches(t *testing.T) {
+	const goroutines = 32
+	t.Run("memWarned latch 1회만 발화", func(t *testing.T) {
+		var stderr threadSafeWriter
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    &stderr,
+			memWarnThreshold: 1,
+		}
+		// 1건 누적 (단일 goroutine으로) — 경고가 1회 발화될 조건.
+		_ = rw.WriteRecord(json.RawMessage(`{}`))
+		// 이후 잘못된 다중 호출이 있어도 latch는 추가 발화 안 함.
+		var wg sync.WaitGroup
+		for range goroutines {
+			wg.Go(func() {
+				// 누적 자체는 race이지만 latch는 atomic.
+				_ = rw.memWarned.CompareAndSwap(false, true)
+			})
+		}
+		wg.Wait()
+		if cnt := strings.Count(stderr.String(), "메모리에 누적된"); cnt != 1 {
+			t.Errorf("경고 발생 횟수=%d, want 1", cnt)
+		}
+	})
+
+	t.Run("finalized latch 1회만 발화", func(t *testing.T) {
+		rw := &statisticsCSVRowWriter{
+			w:         io.Discard,
+			countKeys: make(map[string]struct{}),
+		}
+		var wins atomic.Int32
+		var wg sync.WaitGroup
+		for range goroutines {
+			wg.Go(func() {
+				if rw.finalized.CompareAndSwap(false, true) {
+					wins.Add(1)
+				}
+			})
+		}
+		wg.Wait()
+		if got := wins.Load(); got != 1 {
+			t.Errorf("finalized CAS 성공 횟수=%d, want 1", got)
+		}
+	})
+}
+
+// threadSafeWriter는 ConcurrentLatches 테스트에서 stderr capture 시 race를 피하기 위한 fake.
+type threadSafeWriter struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (w *threadSafeWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *threadSafeWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
 }
 
 func resetStatisticsExportFlags() {
@@ -934,6 +1187,7 @@ func resetStatisticsExportFlags() {
 	statsExportFlagThrottle = statisticsExportThrottleDefault
 	statsExportFlagPageSize = statisticsExportPageSizeDefault
 	statsExportFlagMaxPages = 0
+	statsExportFlagMaxRecords = 0
 	statsExportFlagAppend = false
 	statsExportFlagBOM = false
 	statsExportFlagProgress = "auto"

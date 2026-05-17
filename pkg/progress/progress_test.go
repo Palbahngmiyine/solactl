@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/solapi/solactl/pkg/types"
 )
 
 // --- Format helpers -------------------------------------------------------
@@ -116,29 +118,15 @@ func TestFormatFinalize_Error(t *testing.T) {
 	}
 }
 
-func TestFormatThousands_Boundary(t *testing.T) {
-	tests := []struct {
-		in   int
-		want string
-	}{
-		{0, "0"},
-		{1, "1"},
-		{999, "999"},
-		{1000, "1,000"},
-		{1250, "1,250"},
-		{12345, "12,345"},
-		{123456, "123,456"},
-		{1234567, "1,234,567"},
-		{-1000, "-1,000"},
-		{-1, "-1"},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%d", tt.in), func(t *testing.T) {
-			got := formatThousands(tt.in)
-			if got != tt.want {
-				t.Errorf("formatThousands(%d) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
+// TestFormatThousands_DelegatesToTypes는 wrapper가 본체에 그대로 위임하는지만
+// 검증한다. 본체 함수의 boundary/sign/edge case는 pkg/types/numbers_test.go가
+// 책임지므로 동일 보일러플레이트를 두 패키지에 두지 않는다 (drift 방지).
+func TestFormatThousands_DelegatesToTypes(t *testing.T) {
+	samples := []int{0, 1, 999, 1000, -1234567}
+	for _, n := range samples {
+		if got, want := formatThousands(n), types.FormatThousands(n); got != want {
+			t.Errorf("formatThousands(%d) = %q, types.FormatThousands = %q", n, got, want)
+		}
 	}
 }
 
