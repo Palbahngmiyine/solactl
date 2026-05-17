@@ -562,10 +562,10 @@ func FuzzCSVWriter_NoPanic(f *testing.F) {
 	})
 }
 
-// TestCSVWriter_AppendSkipsExistingBOM은 Gemini 리뷰 회귀 테스트.
-// --bom으로 생성한 파일에 --append할 때, encoding/csv는 BOM(U+FEFF, 0xEF 0xBB 0xBF)을
-// 스킵하지 않으므로 첫 컬럼 헤더 비교 시 BOM이 prefix되어 항상 불일치한다.
-// verifyAppendHeader에서 명시적 BOM 스킵이 필요하다 (Go 공식 문서 권장 패턴).
+// TestCSVWriter_AppendSkipsExistingBOM은 --bom으로 생성한 파일에 --append할 때
+// encoding/csv가 UTF-8 BOM(U+FEFF의 UTF-8 인코딩, 0xEF 0xBB 0xBF)을 자동 스킵하지
+// 않아 첫 컬럼 헤더 비교가 항상 실패했던 버그의 회귀 가드. verifyAppendHeader는
+// bufio.Reader.Peek/Discard로 BOM이 있을 때만 명시적으로 스킵해야 한다.
 func TestCSVWriter_AppendSkipsExistingBOM(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -607,6 +607,14 @@ func TestCSVWriter_AppendSkipsExistingBOM(t *testing.T) {
 			name:     "BOM과 한글 헤더 일치",
 			existing: "\xEF\xBB\xBF날짜,계정\n",
 			headers:  []string{"날짜", "계정"},
+			wantErr:  false,
+		},
+		{
+			// Persistence/recovery: 첫 export가 Flush 후 SIGKILL되어 trailing LF 없이
+			// 끝났더라도 --append로 안전하게 재개되어야 한다 (csv.Reader는 EOF 직전 row 반환).
+			name:     "BOM + trailing LF 없는 헤더만 (잘린 파일 회복)",
+			existing: "\xEF\xBB\xBFa,b,c",
+			headers:  []string{"a", "b", "c"},
 			wantErr:  false,
 		},
 	}
@@ -668,9 +676,11 @@ func TestCSVWriter_AppendBOMRoundtripWithRealFile(t *testing.T) {
 	}
 }
 
-// TestNeedsStrip_MultiByteSafe는 Gemini rune iteration 회귀 테스트.
-// 멀티바이트 UTF-8 문자가 false positive로 strip target으로 잡히면 안 된다.
-// 그리고 진짜 제어문자가 포함된 경우는 true.
+// TestNeedsStrip_MultiByteSafe는 바이트 인덱싱 + rune 캐스트(이전 구현)가
+// 멀티바이트 UTF-8 continuation byte(0x80-0xBF)를 단독 rune으로 잘못 분류하던
+// 잠재 버그의 회귀 가드. for-range over string으로 전환하여 한/중/일/이모지가
+// false positive로 strip 대상이 되지 않고, 진짜 제어문자만 true를 반환해야 한다.
+// invalid UTF-8 시퀀스는 utf8.RuneError(U+FFFD)로 치환되어 보존되는지도 검증.
 func TestNeedsStrip_MultiByteSafe(t *testing.T) {
 	tests := []struct {
 		name string
@@ -692,6 +702,9 @@ func TestNeedsStrip_MultiByteSafe(t *testing.T) {
 		{name: "BS (0x08)", in: "a\x08b", want: true},
 		{name: "빈 문자열", in: "", want: false},
 		{name: "이모지 다음에 NUL", in: "🌏\x00", want: true},
+		// invalid UTF-8 byte: for-range는 U+FFFD로 치환하므로 strip 대상 아님 (보존).
+		{name: "invalid UTF-8 byte 0xFF", in: "a\xFFb", want: false},
+		{name: "lone continuation byte 0xBF", in: "a\xBFb", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -716,6 +729,13 @@ func TestStripControlChars_PreservesMultiByte(t *testing.T) {
 		{name: "이모지 + 제어문자", in: "🎉\x01ok", want: "🎉ok"},
 		{name: "tab/LF/CR 보존", in: "a\tb\nc\rd", want: "a\tb\nc\rd"},
 		{name: "혼합", in: "한\x08글\x1Btest", want: "한글test"},
+		// invalid UTF-8 byte는 needsStrip이 false를 반환해 빠른 경로(원본 그대로 반환)
+		// 진입 — stripControlChars는 제어문자만 제거하고 사용자 데이터를 임의 변환하지
+		// 않는다. (느린 경로에 들어가면 for-range가 U+FFFD로 정규화하므로 두 경로의
+		// 결과가 달라지지만, 현재 의도는 invalid byte도 원본 보존.)
+		{name: "invalid byte는 원본 그대로 보존 (빠른 경로)", in: "a\xFFb", want: "a\xFFb"},
+		// 느린 경로 (제어문자 있음 + invalid byte) — for-range가 U+FFFD로 정규화.
+		{name: "느린 경로 진입 시 invalid byte는 U+FFFD로 치환", in: "a\xFFb\x00", want: "a�b"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

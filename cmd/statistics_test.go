@@ -776,9 +776,11 @@ func TestStatisticsExportDaily_5xxError_PartialDataPreserved(t *testing.T) {
 	}
 }
 
-// TestStatisticsCSVRowWriter_MemoryWarn은 union-header 누적 메모리 가드 회귀.
-// Gemini 리뷰: 모든 record를 메모리에 보관하므로 OOM 위험이 있음.
-// 임계치 도달 시 stderr에 1회만 경고를 출력해야 한다 (idempotency).
+// TestStatisticsCSVRowWriter_MemoryWarn은 union-header 누적 메모리 가드 회귀:
+// 모든 record를 메모리에 보관해야 하므로 OOM 위험이 있고, 임계치 도달 시 stderr에
+// 1회만 경고를 출력해야 한다 (idempotency). 각 sub-test는 records 누적량(state
+// consistency)도 직접 단언하여 향후 가드 회귀가 silently records를 drop하지
+// 않는지 검증한다.
 func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 	t.Run("임계치 미만은 경고 없음", func(t *testing.T) {
 		var stderr bytes.Buffer
@@ -800,6 +802,9 @@ func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 		}
 		if rw.memWarned {
 			t.Error("memWarned가 true로 설정되면 안 됨")
+		}
+		if got := len(rw.records); got != 4 {
+			t.Errorf("records 누적량=%d, want 4 (state consistency)", got)
 		}
 	})
 
@@ -829,6 +834,9 @@ func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 		if cnt := strings.Count(out, "메모리에 누적된"); cnt != 1 {
 			t.Errorf("경고 발생 횟수=%d, want 1 (1회만 출력해야 함)", cnt)
 		}
+		if got := len(rw.records); got != 10 {
+			t.Errorf("records 누적량=%d, want 10 (경고 후에도 누적 계속)", got)
+		}
 	})
 
 	t.Run("memWarnWriter nil이면 panic 없이 비활성", func(t *testing.T) {
@@ -847,6 +855,9 @@ func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 		}
 		if rw.memWarned {
 			t.Error("writer nil인데 memWarned=true (가드 무력화)")
+		}
+		if got := len(rw.records); got != 5 {
+			t.Errorf("records 누적량=%d, want 5", got)
 		}
 	})
 
@@ -867,9 +878,32 @@ func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 		if stderr.Len() != 0 {
 			t.Errorf("threshold=0인데 경고 발생: %q", stderr.String())
 		}
+		if got := len(rw.records); got != 100 {
+			t.Errorf("records 누적량=%d, want 100", got)
+		}
 	})
 
-	t.Run("잘못된 JSON은 에러 반환하되 record 누적 없음", func(t *testing.T) {
+	t.Run("디코드 실패 시 records 누적 없음", func(t *testing.T) {
+		// state consistency: WriteRecord가 unmarshal 후에만 append하므로 디코드
+		// 실패 시 records는 변동이 없어야 한다.
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    io.Discard,
+			memWarnThreshold: 100,
+		}
+		err := rw.WriteRecord(json.RawMessage(`{not valid json`))
+		if err == nil {
+			t.Fatal("잘못된 JSON에서 에러 기대")
+		}
+		if got := len(rw.records); got != 0 {
+			t.Errorf("records 누적량=%d, want 0 (디코드 실패는 누적 없음)", got)
+		}
+	})
+
+	t.Run("이미 warned 상태에서 디코드 실패가 추가 출력 만들지 않음", func(t *testing.T) {
+		// memWarned latch가 유지되고, 디코드 실패는 임계치 검사 이전에 return하므로
+		// 어떤 경로로도 두 번째 경고가 발생하면 안 된다.
 		var stderr bytes.Buffer
 		rw := &statisticsCSVRowWriter{
 			w:                io.Discard,
@@ -877,22 +911,19 @@ func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
 			memWarnWriter:    &stderr,
 			memWarnThreshold: 1,
 		}
-		// 빈 객체 → 정상 디코드 → 1건 누적 → 임계치 1 도달 → 경고 1회
 		if err := rw.WriteRecord(json.RawMessage(`{}`)); err != nil {
 			t.Fatalf("first WriteRecord: %v", err)
 		}
 		if !strings.Contains(stderr.String(), "메모리에 누적된") {
-			t.Errorf("첫 record 후 경고 없음: %q", stderr.String())
+			t.Fatalf("첫 record 후 경고 없음: %q", stderr.String())
 		}
-		// 디코드 실패는 에러 반환 + 누적 없음.
 		stderr.Reset()
-		err := rw.WriteRecord(json.RawMessage(`{not valid json`))
-		if err == nil {
-			t.Error("잘못된 JSON에서 에러 기대")
-		}
-		// 이미 memWarned=true이므로 추가 경고 없음.
+		_ = rw.WriteRecord(json.RawMessage(`{not valid json`))
 		if stderr.Len() != 0 {
 			t.Errorf("디코드 실패 후 추가 출력: %q", stderr.String())
+		}
+		if got := len(rw.records); got != 1 {
+			t.Errorf("records 누적량=%d, want 1 (성공 1건 + 실패 무누적)", got)
 		}
 	})
 }

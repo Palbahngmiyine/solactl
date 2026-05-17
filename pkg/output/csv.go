@@ -94,17 +94,27 @@ func (cw *CSVWriter) Error() error {
 }
 
 // verifyAppendHeader는 reader의 첫 줄을 CSV로 파싱하여 headers와 strict 비교.
-// 기존 파일이 UTF-8 BOM으로 시작하면(예: --bom으로 생성된 파일) 비교 전에 BOM을
-// 건너뛴다. encoding/csv는 BOM을 자동 처리하지 않으므로 그대로 두면 첫 컬럼 헤더에
-// BOM이 prefix되어 항상 불일치한다 (Go 공식 문서 권장 패턴).
+// 기존 파일이 UTF-8 BOM(0xEF 0xBB 0xBF)으로 시작하면(예: --bom으로 생성된 파일)
+// 비교 전에 BOM을 건너뛴다. encoding/csv는 BOM을 자동 처리하지 않으므로 그대로 두면
+// 첫 컬럼 헤더에 BOM이 prefix되어 항상 불일치한다.
+// bufio.Reader.Peek/Discard idiom — Peek은 read pointer를 이동시키지 않으므로
+// BOM이 없으면 데이터 손실 없이 다음 단계로 진행한다.
 func verifyAppendHeader(reader io.Reader, headers []string) error {
 	br := bufio.NewReader(reader)
 
-	// BOM 스킵: 존재할 때만 Discard. Peek/Discard는 buffer 내 무손실.
-	if b, err := br.Peek(len(utf8BOM)); err == nil && bytes.Equal(b, utf8BOM) {
+	// BOM 감지: short read(EOF/UnexpectedEOF)는 "BOM 없음"으로 간주하고 진행 —
+	// 아래 Peek(1) 분기가 동일 EOF를 표면화한다. 그 외 I/O 에러(예: 파일 시스템
+	// 권한, broken pipe)는 즉시 fail-loud로 반환해 silent failure를 방지한다.
+	b, perr := br.Peek(len(utf8BOM))
+	switch {
+	case perr == nil && bytes.Equal(b, utf8BOM):
 		if _, derr := br.Discard(len(utf8BOM)); derr != nil {
 			return fmt.Errorf("CSV BOM 스킵 실패: %w", derr)
 		}
+	case perr == nil, errors.Is(perr, io.EOF), errors.Is(perr, io.ErrUnexpectedEOF):
+		// BOM 없거나 BOM보다 짧은 파일 — 다음 분기로 위임.
+	default:
+		return fmt.Errorf("CSV BOM 감지 실패: %w", perr)
 	}
 
 	// 빈 파일(또는 BOM만 존재)도 명시적으로 거부: 호출자가 별도 분기하도록 시그널링.
@@ -149,8 +159,9 @@ func stripControlChars(s string) string {
 }
 
 // needsStrip은 string을 rune 단위로 순회하여 제거 대상 코드 포인트를 탐지한다.
-// Go 공식 가이드("Strings, bytes, runes and characters") 권장 idiom으로
-// 멀티바이트 UTF-8 문자의 continuation 바이트를 잘못 검사하지 않는다.
+// for-range over string은 UTF-8을 rune 단위로 디코드하므로 멀티바이트 문자의
+// continuation byte를 단독 rune으로 잘못 검사하지 않는다. invalid UTF-8 시퀀스는
+// utf8.RuneError(U+FFFD, 3바이트)로 치환되어 strip 대상이 아니므로 보존된다.
 func needsStrip(s string) bool {
 	for _, r := range s {
 		if isStripTarget(r) {

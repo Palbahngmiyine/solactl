@@ -29,7 +29,9 @@ const (
 
 	// statisticsCSVRowWriter는 union-header 결정을 위해 모든 record를 메모리에
 	// 누적한다. 이 임계치 도달 시 stderr에 1회 경고를 출력하여 OOM 위험을
-	// 사용자가 인지하도록 한다 (CLAUDE.md "resource cleanup" / fail-loud 원칙).
+	// 사용자가 인지하도록 한다 (fail-loud: 실패 직전이 아니라 위험 시점에 알림).
+	// 100,000건은 record당 평균 약 0.5KB(예: 30~80 count.* 키 포함) 가정 시
+	// 약 50MB 메모리 사용량에 해당 — 일반 호스트에서 OOM 직전 마진 확보용 보수치.
 	statisticsCSVMemoryWarnThreshold = 100_000
 )
 
@@ -333,12 +335,13 @@ func newStatisticsFetcher(c *client.Client, pageSize int, prepaid string) export
 // --- RowWriter 구현 ---
 
 // statisticsCSVRowWriter는 union-header 전략으로 모든 record를 누적 후 FinalizeWrite에서
-// 단일 헤더와 함께 일괄 출력한다. 스트리밍 모드는 헤더가 미정이라 불가능.
+// 단일 헤더와 함께 일괄 출력한다. count.* union-header를 사전에 알 수 없으므로
+// streaming이 불가능하고 모든 record를 메모리에 보관할 수밖에 없다. 누적량이
+// statisticsCSVMemoryWarnThreshold를 초과하면 stderr에 1회 경고를 출력하여 사용자가
+// 기간 분할을 결정할 수 있게 한다.
 //
-// 메모리 가드: count.* union-header를 사전에 알 수 없으므로 모든 record를 메모리에
-// 보관할 수밖에 없다. 누적량이 statisticsCSVMemoryWarnThreshold를 초과하면 stderr에
-// 1회 경고를 출력하여 사용자가 기간 분할 또는 자동화 모니터링을 결정할 수 있게 한다.
-// (Best practice: 실패 직전이 아닌 위험 시점에 fail-loud로 알린다.)
+// 동시성 계약: WriteRecord / FinalizeWrite는 단일 goroutine에서만 호출되어야 한다
+// (records / countKeys / memWarned는 unsynchronized). exporter.Run이 이 invariant를 보장한다.
 type statisticsCSVRowWriter struct {
 	w            io.Writer
 	appendMode   bool
@@ -348,12 +351,9 @@ type statisticsCSVRowWriter struct {
 	records   []*dailyStatRecord
 	countKeys map[string]struct{}
 
-	// memWarnWriter는 메모리 임계치 경고를 출력할 곳. nil이면 경고 비활성(테스트용 nil 허용).
-	memWarnWriter io.Writer
-	// memWarnThreshold는 경고 발동 record 수. 0은 무한대(=비활성).
-	memWarnThreshold int
-	// memWarned는 임계치 경고를 이미 출력했는지 추적 (1회만 출력).
-	memWarned bool
+	memWarnWriter    io.Writer // nil이면 비활성 (테스트용 명시 옵트아웃)
+	memWarnThreshold int       // 0이면 비활성
+	memWarned        bool      // 1회만 출력하기 위한 latch
 }
 
 func (s *statisticsCSVRowWriter) WriteRecord(rec json.RawMessage) error {

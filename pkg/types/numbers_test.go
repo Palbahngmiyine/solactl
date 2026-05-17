@@ -8,8 +8,6 @@ import (
 )
 
 // TestFormatThousands는 boundary, sign, edge case를 모두 검증한다.
-// 기존에는 pkg/progress의 wrapper로만 간접 검증되었으나, 함수를 numbers.go로
-// 이동하면서 단위 테스트도 함께 numbers_test.go에 배치한다.
 func TestFormatThousands(t *testing.T) {
 	tests := []struct {
 		name string
