@@ -562,6 +562,170 @@ func FuzzCSVWriter_NoPanic(f *testing.F) {
 	})
 }
 
+// TestCSVWriter_AppendSkipsExistingBOM은 Gemini 리뷰 회귀 테스트.
+// --bom으로 생성한 파일에 --append할 때, encoding/csv는 BOM(U+FEFF, 0xEF 0xBB 0xBF)을
+// 스킵하지 않으므로 첫 컬럼 헤더 비교 시 BOM이 prefix되어 항상 불일치한다.
+// verifyAppendHeader에서 명시적 BOM 스킵이 필요하다 (Go 공식 문서 권장 패턴).
+func TestCSVWriter_AppendSkipsExistingBOM(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing string
+		headers  []string
+		wantErr  bool
+	}{
+		{
+			name:     "BOM prefix와 정확히 일치하는 헤더",
+			existing: "\xEF\xBB\xBFa,b,c\nr1,r2,r3\n",
+			headers:  []string{"a", "b", "c"},
+			wantErr:  false,
+		},
+		{
+			name:     "BOM 없이 일치하는 헤더 (기존 동작 보존)",
+			existing: "a,b,c\n",
+			headers:  []string{"a", "b", "c"},
+			wantErr:  false,
+		},
+		{
+			name:     "BOM 후 헤더 불일치",
+			existing: "\xEF\xBB\xBFa,b,c\n",
+			headers:  []string{"a", "b", "d"},
+			wantErr:  true,
+		},
+		{
+			name:     "BOM만 존재하고 헤더 없음 — 빈 파일과 동일 취급",
+			existing: "\xEF\xBB\xBF",
+			headers:  []string{"a"},
+			wantErr:  true,
+		},
+		{
+			name:     "잘린 BOM (2바이트만) — BOM 아님으로 취급, CSV 파싱 실패",
+			existing: "\xEF\xBB",
+			headers:  []string{"a"},
+			wantErr:  true,
+		},
+		{
+			name:     "BOM과 한글 헤더 일치",
+			existing: "\xEF\xBB\xBF날짜,계정\n",
+			headers:  []string{"날짜", "계정"},
+			wantErr:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			_, err := NewCSVWriter(&buf, strings.NewReader(tt.existing), CSVOptions{
+				Headers: tt.headers,
+				Append:  true,
+			})
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestCSVWriter_AppendBOMRoundtripWithRealFile은 end-to-end 회귀:
+// --bom으로 생성한 CSV에 --append하여 헤더 검증이 통과하는지 검증.
+func TestCSVWriter_AppendBOMRoundtripWithRealFile(t *testing.T) {
+	var first bytes.Buffer
+	cw1, err := NewCSVWriter(&first, nil, CSVOptions{
+		Headers: []string{"id", "name"},
+		AddBOM:  true,
+	})
+	if err != nil {
+		t.Fatalf("first NewCSVWriter: %v", err)
+	}
+	if err := cw1.WriteRow([]string{"1", "alice"}); err != nil {
+		t.Fatalf("WriteRow: %v", err)
+	}
+	if err := cw1.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	// 두 번째 writer가 첫 번째 출력에 append.
+	var second bytes.Buffer
+	reader := bytes.NewReader(first.Bytes())
+	cw2, err := NewCSVWriter(&second, reader, CSVOptions{
+		Headers: []string{"id", "name"},
+		Append:  true,
+		AddBOM:  true, // append 모드에서는 무시되어야 하지만 호출자가 동일 옵션 전달하는 시나리오.
+	})
+	if err != nil {
+		t.Fatalf("append NewCSVWriter (BOM 스킵 회귀): %v", err)
+	}
+	if err := cw2.WriteRow([]string{"2", "bob"}); err != nil {
+		t.Fatalf("append WriteRow: %v", err)
+	}
+	if err := cw2.Flush(); err != nil {
+		t.Fatalf("append Flush: %v", err)
+	}
+	// append 모드는 BOM/헤더 모두 안 씀.
+	if got := second.String(); got != "2,bob\n" {
+		t.Errorf("got %q, want %q", got, "2,bob\n")
+	}
+}
+
+// TestNeedsStrip_MultiByteSafe는 Gemini rune iteration 회귀 테스트.
+// 멀티바이트 UTF-8 문자가 false positive로 strip target으로 잡히면 안 된다.
+// 그리고 진짜 제어문자가 포함된 경우는 true.
+func TestNeedsStrip_MultiByteSafe(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "ASCII 평문", in: "hello world", want: false},
+		{name: "한글", in: "안녕하세요", want: false},
+		{name: "중국어", in: "你好世界", want: false},
+		{name: "일본어", in: "こんにちは", want: false},
+		{name: "이모지", in: "🎉🌏", want: false},
+		{name: "한글 + 콤마 + 따옴표", in: "안녕\"세상\",ok", want: false},
+		{name: "tab/LF/CR은 보존 (false)", in: "a\tb\nc\rd", want: false},
+		{name: "NUL", in: "x\x00y", want: true},
+		{name: "한글 + NUL", in: "안녕\x00세상", want: true},
+		{name: "ESC (0x1B)", in: "a\x1Bb", want: true},
+		{name: "VT (0x0B)", in: "a\x0Bb", want: true},
+		{name: "FF (0x0C)", in: "a\x0Cb", want: true},
+		{name: "BS (0x08)", in: "a\x08b", want: true},
+		{name: "빈 문자열", in: "", want: false},
+		{name: "이모지 다음에 NUL", in: "🌏\x00", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := needsStrip(tt.in); got != tt.want {
+				t.Errorf("needsStrip(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStripControlChars_PreservesMultiByte는 멀티바이트 문자가 제거되지 않고
+// 비표시 제어문자만 제거되는지 검증.
+func TestStripControlChars_PreservesMultiByte(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "한글 보존", in: "안녕하세요", want: "안녕하세요"},
+		{name: "한글 + NUL 제거", in: "안\x00녕", want: "안녕"},
+		{name: "이모지 보존", in: "🎉ok", want: "🎉ok"},
+		{name: "이모지 + 제어문자", in: "🎉\x01ok", want: "🎉ok"},
+		{name: "tab/LF/CR 보존", in: "a\tb\nc\rd", want: "a\tb\nc\rd"},
+		{name: "혼합", in: "한\x08글\x1Btest", want: "한글test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripControlChars(tt.in); got != tt.want {
+				t.Errorf("stripControlChars(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func FuzzCSVWriter_StripRoundtrip(f *testing.F) {
 	// StripCtrl=true 적용 후 라운드트립으로 동일한 sanitized 값이 나와야 함.
 	f.Add("normal text")

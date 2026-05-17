@@ -2,6 +2,7 @@ package output
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -93,9 +94,20 @@ func (cw *CSVWriter) Error() error {
 }
 
 // verifyAppendHeader는 reader의 첫 줄을 CSV로 파싱하여 headers와 strict 비교.
+// 기존 파일이 UTF-8 BOM으로 시작하면(예: --bom으로 생성된 파일) 비교 전에 BOM을
+// 건너뛴다. encoding/csv는 BOM을 자동 처리하지 않으므로 그대로 두면 첫 컬럼 헤더에
+// BOM이 prefix되어 항상 불일치한다 (Go 공식 문서 권장 패턴).
 func verifyAppendHeader(reader io.Reader, headers []string) error {
-	// 빈 파일도 명시적으로 거부: 호출자가 별도 분기하도록 시그널링.
 	br := bufio.NewReader(reader)
+
+	// BOM 스킵: 존재할 때만 Discard. Peek/Discard는 buffer 내 무손실.
+	if b, err := br.Peek(len(utf8BOM)); err == nil && bytes.Equal(b, utf8BOM) {
+		if _, derr := br.Discard(len(utf8BOM)); derr != nil {
+			return fmt.Errorf("CSV BOM 스킵 실패: %w", derr)
+		}
+	}
+
+	// 빈 파일(또는 BOM만 존재)도 명시적으로 거부: 호출자가 별도 분기하도록 시그널링.
 	if _, err := br.Peek(1); err != nil {
 		if errors.Is(err, io.EOF) {
 			return errors.New("CSV 헤더 불일치: 기존 파일이 비어 있음 (Append 대신 일반 모드 사용 필요)")
@@ -136,9 +148,12 @@ func stripControlChars(s string) string {
 	return b.String()
 }
 
+// needsStrip은 string을 rune 단위로 순회하여 제거 대상 코드 포인트를 탐지한다.
+// Go 공식 가이드("Strings, bytes, runes and characters") 권장 idiom으로
+// 멀티바이트 UTF-8 문자의 continuation 바이트를 잘못 검사하지 않는다.
 func needsStrip(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if isStripTarget(rune(s[i])) {
+	for _, r := range s {
+		if isStripTarget(r) {
 			return true
 		}
 	}

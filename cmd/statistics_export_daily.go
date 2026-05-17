@@ -26,6 +26,11 @@ const (
 	statisticsExportPageSizeMax     = 100
 	statisticsExportPageSizeDefault = 30
 	statisticsExportThrottleDefault = 500 * time.Millisecond
+
+	// statisticsCSVRowWriter는 union-header 결정을 위해 모든 record를 메모리에
+	// 누적한다. 이 임계치 도달 시 stderr에 1회 경고를 출력하여 OOM 위험을
+	// 사용자가 인지하도록 한다 (CLAUDE.md "resource cleanup" / fail-loud 원칙).
+	statisticsCSVMemoryWarnThreshold = 100_000
 )
 
 var (
@@ -329,6 +334,11 @@ func newStatisticsFetcher(c *client.Client, pageSize int, prepaid string) export
 
 // statisticsCSVRowWriter는 union-header 전략으로 모든 record를 누적 후 FinalizeWrite에서
 // 단일 헤더와 함께 일괄 출력한다. 스트리밍 모드는 헤더가 미정이라 불가능.
+//
+// 메모리 가드: count.* union-header를 사전에 알 수 없으므로 모든 record를 메모리에
+// 보관할 수밖에 없다. 누적량이 statisticsCSVMemoryWarnThreshold를 초과하면 stderr에
+// 1회 경고를 출력하여 사용자가 기간 분할 또는 자동화 모니터링을 결정할 수 있게 한다.
+// (Best practice: 실패 직전이 아닌 위험 시점에 fail-loud로 알린다.)
 type statisticsCSVRowWriter struct {
 	w            io.Writer
 	appendMode   bool
@@ -337,6 +347,13 @@ type statisticsCSVRowWriter struct {
 
 	records   []*dailyStatRecord
 	countKeys map[string]struct{}
+
+	// memWarnWriter는 메모리 임계치 경고를 출력할 곳. nil이면 경고 비활성(테스트용 nil 허용).
+	memWarnWriter io.Writer
+	// memWarnThreshold는 경고 발동 record 수. 0은 무한대(=비활성).
+	memWarnThreshold int
+	// memWarned는 임계치 경고를 이미 출력했는지 추적 (1회만 출력).
+	memWarned bool
 }
 
 func (s *statisticsCSVRowWriter) WriteRecord(rec json.RawMessage) error {
@@ -347,6 +364,16 @@ func (s *statisticsCSVRowWriter) WriteRecord(rec json.RawMessage) error {
 	s.records = append(s.records, &r)
 	for k := range r.Count {
 		s.countKeys[k] = struct{}{}
+	}
+	if !s.memWarned && s.memWarnThreshold > 0 && s.memWarnWriter != nil &&
+		len(s.records) >= s.memWarnThreshold {
+		s.memWarned = true
+		_, _ = fmt.Fprintf(s.memWarnWriter,
+			"경고: 메모리에 누적된 statistics record가 %d건을 넘었습니다. "+
+				"union-header 전략 특성상 모든 record를 보관해야 합니다. "+
+				"매우 큰 기간/계정 export는 기간을 분할하여 실행하세요.\n",
+			s.memWarnThreshold,
+		)
 	}
 	return nil
 }
@@ -425,10 +452,12 @@ func newStatisticsRowWriter(format string, w io.Writer, path string, appendMode,
 	switch format {
 	case "csv":
 		rw := &statisticsCSVRowWriter{
-			w:          w,
-			appendMode: appendMode,
-			bom:        bom,
-			countKeys:  make(map[string]struct{}),
+			w:                w,
+			appendMode:       appendMode,
+			bom:              bom,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    errOut(),
+			memWarnThreshold: statisticsCSVMemoryWarnThreshold,
 		}
 		if appendMode && path != "-" {
 			// Append 모드: 기존 헤더는 FinalizeWrite 시점에 검증한다 — union 결정 후에만 비교 가능.

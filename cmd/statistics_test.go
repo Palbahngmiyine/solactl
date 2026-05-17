@@ -776,6 +776,127 @@ func TestStatisticsExportDaily_5xxError_PartialDataPreserved(t *testing.T) {
 	}
 }
 
+// TestStatisticsCSVRowWriter_MemoryWarn은 union-header 누적 메모리 가드 회귀.
+// Gemini 리뷰: 모든 record를 메모리에 보관하므로 OOM 위험이 있음.
+// 임계치 도달 시 stderr에 1회만 경고를 출력해야 한다 (idempotency).
+func TestStatisticsCSVRowWriter_MemoryWarn(t *testing.T) {
+	t.Run("임계치 미만은 경고 없음", func(t *testing.T) {
+		var stderr bytes.Buffer
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    &stderr,
+			memWarnThreshold: 5,
+		}
+		// 4건만 작성 (임계치 5 미만).
+		for range 4 {
+			rec := json.RawMessage(`{"date":"2026-05-09","accountId":"AC1","count":{"SMS":1}}`)
+			if err := rw.WriteRecord(rec); err != nil {
+				t.Fatalf("WriteRecord: %v", err)
+			}
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("임계치 미만에서 경고 발생: %q", stderr.String())
+		}
+		if rw.memWarned {
+			t.Error("memWarned가 true로 설정되면 안 됨")
+		}
+	})
+
+	t.Run("임계치 도달 시 1회만 경고", func(t *testing.T) {
+		var stderr bytes.Buffer
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    &stderr,
+			memWarnThreshold: 3,
+		}
+		// 10건 작성 — 임계치 3 초과 (idempotency 검증).
+		rec := json.RawMessage(`{"date":"2026-05-09","accountId":"AC1","count":{"SMS":1}}`)
+		for i := range 10 {
+			if err := rw.WriteRecord(rec); err != nil {
+				t.Fatalf("WriteRecord %d: %v", i, err)
+			}
+		}
+		out := stderr.String()
+		if !strings.Contains(out, "메모리에 누적된") {
+			t.Errorf("경고 메시지 누락: %q", out)
+		}
+		if !strings.Contains(out, "3건") {
+			t.Errorf("임계치 값 누락: %q", out)
+		}
+		// 1회만 출력 — "메모리에 누적된" 키워드는 정확히 1번만 등장해야 함.
+		if cnt := strings.Count(out, "메모리에 누적된"); cnt != 1 {
+			t.Errorf("경고 발생 횟수=%d, want 1 (1회만 출력해야 함)", cnt)
+		}
+	})
+
+	t.Run("memWarnWriter nil이면 panic 없이 비활성", func(t *testing.T) {
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    nil,
+			memWarnThreshold: 1, // 즉시 임계치 초과 조건이지만 writer nil이라 무시.
+		}
+		// panic이 발생하면 테스트 실패.
+		rec := json.RawMessage(`{"date":"2026-05-09","accountId":"AC1","count":{}}`)
+		for range 5 {
+			if err := rw.WriteRecord(rec); err != nil {
+				t.Fatalf("WriteRecord: %v", err)
+			}
+		}
+		if rw.memWarned {
+			t.Error("writer nil인데 memWarned=true (가드 무력화)")
+		}
+	})
+
+	t.Run("memWarnThreshold 0이면 비활성", func(t *testing.T) {
+		var stderr bytes.Buffer
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    &stderr,
+			memWarnThreshold: 0,
+		}
+		rec := json.RawMessage(`{"date":"2026-05-09","accountId":"AC1","count":{}}`)
+		for range 100 {
+			if err := rw.WriteRecord(rec); err != nil {
+				t.Fatalf("WriteRecord: %v", err)
+			}
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("threshold=0인데 경고 발생: %q", stderr.String())
+		}
+	})
+
+	t.Run("잘못된 JSON은 에러 반환하되 record 누적 없음", func(t *testing.T) {
+		var stderr bytes.Buffer
+		rw := &statisticsCSVRowWriter{
+			w:                io.Discard,
+			countKeys:        make(map[string]struct{}),
+			memWarnWriter:    &stderr,
+			memWarnThreshold: 1,
+		}
+		// 빈 객체 → 정상 디코드 → 1건 누적 → 임계치 1 도달 → 경고 1회
+		if err := rw.WriteRecord(json.RawMessage(`{}`)); err != nil {
+			t.Fatalf("first WriteRecord: %v", err)
+		}
+		if !strings.Contains(stderr.String(), "메모리에 누적된") {
+			t.Errorf("첫 record 후 경고 없음: %q", stderr.String())
+		}
+		// 디코드 실패는 에러 반환 + 누적 없음.
+		stderr.Reset()
+		err := rw.WriteRecord(json.RawMessage(`{not valid json`))
+		if err == nil {
+			t.Error("잘못된 JSON에서 에러 기대")
+		}
+		// 이미 memWarned=true이므로 추가 경고 없음.
+		if stderr.Len() != 0 {
+			t.Errorf("디코드 실패 후 추가 출력: %q", stderr.String())
+		}
+	})
+}
+
 func resetStatisticsExportFlags() {
 	statsExportFlagOutput = ""
 	statsExportFlagFormat = "csv"
