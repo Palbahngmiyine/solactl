@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.8](https://github.com/solapi/solactl/compare/v0.1.7...v0.1.8) (2026-05-18)
+
+
+### Features
+
+* **export:** 메시지/통계 export 명령 추가 ([d920f3f](https://github.com/solapi/solactl/commit/d920f3f32681f038424e628417adec739dc45408))
+* **export:** 메시지/통계 export 명령 추가 ([e9722d4](https://github.com/solapi/solactl/commit/e9722d4a75e69b29180d3ac9602e16d393498fbb))
+* **install:** add rootless Windows installer (PowerShell) ([2d2d589](https://github.com/solapi/solactl/commit/2d2d5890bac2f736c5577d8d064dc6ffe4113a14))
+* **install:** add rootless Windows installer script ([bca72fe](https://github.com/solapi/solactl/commit/bca72fe23aed966e57c1201ad5bfe7744e4d0744))
+* **release:** sign checksums.txt with cosign keyless ([c0fbcf7](https://github.com/solapi/solactl/commit/c0fbcf7295dd3466950da7d5ca0caad8b2ae295a))
+* **release:** sign checksums.txt with cosign keyless (Sigstore) ([aefc536](https://github.com/solapi/solactl/commit/aefc5369e415a8cf5a6d07a38a0da49e6336b0ff))
+* **statistics:** --max-records 옵션 + idempotent FinalizeWrite + atomic latch ([1353321](https://github.com/solapi/solactl/commit/13533212571e7e59885ec9a32e04af011aecf0cb))
+
+
+### Bug Fixes
+
+* **clock:** ineffassign 해결 — defensive copy 테스트의 append 결과 검증 추가 ([74903ad](https://github.com/solapi/solactl/commit/74903ad1e139637e37b71aa6a14fe35f47ac7103))
+* **export:** Gemini PR [#19](https://github.com/solapi/solactl/issues/19) 리뷰 대응 — BOM/rune/메모리 가드/유틸 분리 ([d9ebcb2](https://github.com/solapi/solactl/commit/d9ebcb21e7aea6b43b6465882de4997a9fa9cde9))
+
 ## [0.1.7](https://github.com/solapi/solactl/compare/v0.1.6...v0.1.7) (2026-05-08)
 
 
