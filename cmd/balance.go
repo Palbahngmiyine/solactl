@@ -3,10 +3,10 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/solapi/solactl/pkg/types"
 )
 
 var balanceCmd = &cobra.Command{
@@ -52,35 +52,4 @@ func runBalance(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// formatNumber formats an integer with thousand separators.
-func formatNumber(n int) string {
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-
-	s := strconv.Itoa(n)
-	if len(s) <= 3 {
-		if negative {
-			return "-" + s
-		}
-		return s
-	}
-
-	var b strings.Builder
-	offset := len(s) % 3
-	if offset > 0 {
-		b.WriteString(s[:offset])
-	}
-	for i := offset; i < len(s); i += 3 {
-		if b.Len() > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(s[i : i+3])
-	}
-
-	if negative {
-		return "-" + b.String()
-	}
-	return b.String()
-}
+func formatNumber(n int) string { return types.FormatThousands(n) }
